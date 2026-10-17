@@ -1,0 +1,3 @@
+#!/bin/sh
+[ "$1" = -b ] || exit 1
+if [ "$2" = - ]; then echo "test backup" | gzip -c; else echo "test backup" | gzip -c > "$2"; fi

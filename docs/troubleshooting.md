@@ -1,0 +1,81 @@
+# Troubleshooting
+
+## The computer can't reach a router
+
+Roamer explains why: nothing answers, SSH refused (often a WAN side), login refused, or *this
+computer has no address in that network*. It then tries the router over IPv6 link-local, and
+offers **retry**, **another address** or **go through the Gateway** (log in to the Gateway once,
+every connection hops through it).
+
+## Laptop on a Dumb AP's LAN port: internet works, the Dumb AP doesn't answer
+
+Frames between that port and the Gateway are switched fine, but the path between that port and the
+Dumb AP's own processor is broken. From that laptop, with that cabling:
+
+```sh
+./roaming-setup.sh lantest
+```
+
+1. checks the laptop's address and the direct path;
+2. logs in to the Gateway (no time limit), then to the Dumb AP through it;
+3. pings the Dumb AP directly while watching its port counters, ARP and bridge from inside;
+4. names the cause and fixes it after a **backup**:
+   - **WAN bridged into the LAN** (the usual cause; left behind by Roamer ≤ 7.4): WAN leaves the
+     bridge, you move the Gateway cable to a free LAN port, your laptop confirms over its cable.
+     Not confirmed within 5 minutes → it reverts by itself.
+   - otherwise: clear its tables → restart its network → reboot (checked by uptime), re-testing
+     after each; "works" needs two ping rounds plus SSH.
+
+Everything goes into `roaming-lantest_<time>.txt`. Attach it to an issue if nothing helped.
+
+A laptop with **two network cards in the same network** (e.g. one cabled to the Dumb AP, one to the
+Gateway) answers ARP for its address on both, and replies can go to the wrong card. Unplug one or
+set `net.ipv4.conf.all.arp_ignore=1` and `arp_announce=2`. `lantest` warns when it sees this.
+
+## diag, state, status, report
+
+```sh
+./roaming-setup.sh diag     # LAN ports + link state, devices per port, Gateway DHCP, routing, Tailscale, SSH
+./roaming-setup.sh state    # one line: applying / waiting · rollback in N s · Gateway via LAN ports · confirmation
+./roaming-setup.sh status   # the Dumb AP's switch-over log
+./roaming-setup.sh report   # what is set up
+```
+
+## Reading the usteer page
+
+- A phone appears on **every** router's usteer page: each router hears its probes. **Load**
+  counts associated clients, so "load 1 on the Gateway, 0 on the Dumb AP" means it is on the
+  Gateway right now.
+- The **IP** column comes from what that router knows locally. A Dumb AP has no DHCP leases, so it
+  may label the phone with another address it knows (e.g. its tailnet address). That's only a label.
+
+## Verify roaming
+
+```sh
+ubus call usteer remote_hosts      # every router sees the others
+ubus call usteer get_clients       # client signal as seen by each router
+hostapd_cli -i <phyX-apY> all_sta | grep -E '^[0-9a-f:]{17}$|AKMSuiteSelector'   # 000fac-4/-9 = FT-PSK/FT-SAE
+logread -f | grep -Ei 'usteer|FT|auth'
+```
+
+If some clients struggle with FT in WPA2/WPA3 mixed mode, choose `psk2` (FT-PSK) on all routers.
+
+## Tailscale on a Dumb AP
+
+Optional and usually unnecessary. With **accept-routes**, the Gateway's advertised LAN route makes
+the Dumb AP answer LAN devices through the tailnet, and it disappears from the LAN. Roamer
+detects this and offers to turn it off. It refuses a Dumb AP that *advertises* routes.
+
+## Getting a Dumb AP back
+
+1. **Wait** for the automatic rollback (300 s). If the Gateway cable was in its WAN port before,
+   put it back there.
+2. **Laptop on any LAN port**: link-local or recovery address (see [wiring](wiring.md)).
+3. **Unplug the Gateway cable and power-cycle**; a laptop on its first LAN port gets an address from
+   its old DHCP → `ssh root@<old address>`.
+4. **Failsafe**: laptop on the **first LAN port** with a **fixed 192.168.1.10/24**; power on, tap
+   reset when the status LED blinks (it then blinks fast); `ssh root@192.168.1.1`, `mount_root`,
+   `sh /etc/roaming-setup.bak/restore-latest.sh` (or `firstboot -y && reboot -f`).
+5. The device's bootloader recovery (TFTP / web / nmrpflash): see its OpenWrt wiki page.
+
+Undo on any router: home menu → **undo**, or `./roaming-setup.sh undo`.

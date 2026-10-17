@@ -1,0 +1,31 @@
+#!/bin/sh
+# test stand-in for ssh: runs the remote command locally as "the router" (RS_MODE=router).
+#   MOCK_DOWN="ip …"   these addresses don't answer directly (a ProxyCommand hop still reaches them)
+#   MOCK_LATE_IP/N     this address answers only after N attempts (e.g. a cable being moved)
+#   MOCK_FIXED_IP      answers directly once $MOCK_STATE/fixed exists (set by unbridge/network restart)
+cmd=""; host=""; hop=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) case "$2" in ProxyCommand=*) hop=1;; esac; shift 2; continue;;
+    -F|-S|-W) shift 2; continue;;
+    -O) exit 0;;
+    -t|-T|-f|-N|-fN) shift; continue;;
+  esac
+  if [ -z "$host" ]; then host="$1"; shift; continue; fi
+  cmd="$*"; break
+done
+ip="${host#root@}"
+down() { echo "ssh: connect to host $ip port 22: Connection timed out" >&2; exit 255; }
+case "$cmd" in *"unbridge"*|*"network restart"*) touch "$MOCK_STATE/fixed";; esac
+if [ -z "$hop" ]; then
+  if [ "$ip" = "${MOCK_LATE_IP:-}" ] && [ ! -f "$MOCK_STATE/fixed" ]; then
+    n=$(cat "$MOCK_STATE/late.n" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$MOCK_STATE/late.n"
+    [ "$n" -gt "${MOCK_LATE_N:-2}" ] || down
+    touch "$MOCK_STATE/fixed"
+  fi
+  if [ ! -f "$MOCK_STATE/fixed" ] || [ "$ip" != "${MOCK_FIXED_IP:-}" ]; then
+    case " ${MOCK_DOWN:-} " in *" $ip "*) down;; esac
+  fi
+fi
+[ -n "$cmd" ] || exit 0
+SSH_CONNECTION="192.168.2.3 5555 $ip 22" RS_MODE=router exec sh -c "$cmd"

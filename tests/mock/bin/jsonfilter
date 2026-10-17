@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+import sys,json,re
+a=sys.argv[1:]
+if '-i' in a: s=open(a[a.index('-i')+1]).read()
+elif '-s' in a: s=a[a.index('-s')+1]
+else: s=sys.stdin.read()
+e=a[a.index('-e')+1]
+try: d=json.loads(s)
+except Exception: sys.exit(1)
+try:
+  if e=='@.up': r=str(d['up']).lower()
+  elif e=='@["ipv4-address"][0].address': r=d['ipv4-address'][0]['address']
+  elif e=='@["ipv4-address"][0].mask': r=str(d['ipv4-address'][0]['mask'])
+  elif e=='@.route[@.target="0.0.0.0"].nexthop': r=[x['nexthop'] for x in d['route'] if x['target']=='0.0.0.0'][0]
+  elif e=='@.l3_device': r=d['l3_device']
+  elif e=='@.network.lan.ports[0]': r=d['network']['lan']['ports'][0]
+  else:
+    m=re.match(r'@\.(\w+)\.interfaces\[\*\]\.ifname',e); r=d[m.group(1)]['interfaces'][0]['ifname']
+except Exception: sys.exit(1)
+print(r)

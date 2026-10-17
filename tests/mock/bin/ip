@@ -1,0 +1,15 @@
+#!/bin/sh
+# test stand-in for `ip` — answers only what roaming-setup.sh asks
+case "$*" in
+  *"route get"*) echo "${MOCK_ROUTE:-$4 dev br-lan src 192.168.1.1}";;
+  *"route show default"*) echo "default via ${MOCK_DEFGW:-192.168.2.1} dev eth0";;
+  *"-o link show wan"*) echo "6: wan@eth0: <BROADCAST,MULTICAST,UP> mtu 1500";;
+  *"-o link show lan"[1-4]*) echo "3: ${4:-lan1}@eth1: <BROADCAST,MULTICAST,UP> mtu 1500";;
+  *"addr add"*|*"addr del"*|*"route add"*|*"route del"*|*"neigh flush"*) ;;
+  *"-6 -o addr show dev br-lan scope link"*) echo "5: br-lan    inet6 fe80::1234:5678:9abc:def0/64 scope link";;
+  *"addr show dev br-lan"*|*"addr show br-lan"*) echo "5: br-lan    inet ${MOCK_BRIP:-192.168.1.1/24} brd x scope global br-lan";;
+  *"addr show dev wan"*|*"addr show wan"*) [ -z "${MOCK_WANIP:-}" ] || echo "6: wan    inet $MOCK_WANIP brd x scope global wan";;
+  *"-4 -o addr show"*) echo "5: br-lan    inet ${MOCK_BRIP:-192.168.1.1/24} brd x scope global br-lan"
+                      [ -z "${MOCK_WANIP:-}" ] || echo "6: wan    inet $MOCK_WANIP brd x scope global wan";;
+esac
+exit 0

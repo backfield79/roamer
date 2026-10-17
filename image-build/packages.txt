@@ -1,0 +1,27 @@
+# Extra packages on top of the device defaults (OpenWrt 25.12.x, apk) — Roamer + Tailscale image.
+# One per line; "-pkg" removes a default package. Comments and blank lines are ignored.
+
+# --- Web UI (HTTPS) ---
+luci
+luci-ssl
+
+# --- Full hostapd: 802.11r is in wpad-basic, but 802.11v (WNM/BSS transition)
+#     and the usteer kick/steer path need the full build ---
+-wpad-basic-mbedtls
+wpad-mbedtls
+
+# --- Tailscale + LuCI page (Services > Tailscale; supports Headscale login server) ---
+tailscale
+luci-app-tailscale-community
+
+# --- Multi-AP client steering (802.11k neighbour reports + 802.11v BTM) ---
+usteer
+luci-app-usteer
+
+# --- Future upgrades that keep this package set ---
+luci-app-attendedsysupgrade
+owut
+
+# --- Handy for verifying roaming / throughput (hostapd_cli shows per-client AKM) ---
+hostapd-utils
+iperf3

@@ -1,0 +1,8 @@
+#!/bin/sh
+# answers like the Gateway's DHCP server when MOCK_GWLAN="router|ip|prefix" is set
+s=""; while [ $# -gt 0 ]; do [ "$1" = -s ] && s=$2; shift; done
+[ -n "${MOCK_GWLAN:-}" ] || exit 1
+IFS='|' read -r router ip mask <<X
+$MOCK_GWLAN
+X
+export router ip mask serverid="$router"; [ -n "$s" ] && [ "$s" != /bin/true ] && "$s" bound; exit 0

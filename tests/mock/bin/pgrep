@@ -1,0 +1,2 @@
+#!/bin/sh
+case "$*" in *dnsmasq*) exit 0;; esac; exit 1

@@ -1,0 +1,2 @@
+#!/bin/sh
+[ -n "${WAN_JSON:-}" ] && echo "$WAN_JSON" || echo '{"up":false,"l3_device":"wan"}'

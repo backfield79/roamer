@@ -1,0 +1,9 @@
+#!/bin/sh
+db="$MOCK_STATE/apk.installed"
+case "$1" in
+  info) grep -qx "$3" "$db" ;;
+  search) echo "$2-1.0-r1" ;;
+  update) exit 0 ;;
+  add) shift; for p; do echo "$p" >> "$db"; done ;;
+  del) shift; for p; do grep -vx "$p" "$db" > "$db.n"; mv "$db.n" "$db"; done ;;
+esac
