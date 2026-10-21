@@ -1,0 +1,14 @@
+# roaming-setup.sh is POSIX sh for busybox ash. Intentional patterns:
+#  SC2086  $SSHO / $SSHB are option lists that must word-split
+#  SC2154  variables set through eval (choose/ask)
+#  SC2034  variables read by eval'd code or sourced files
+#  SC3045  `read -s` fallback, only where busybox supports it
+#  SC2015  `a && b || c` used deliberately with c as a safe fallback
+#  SC2016  single-quoted remote commands are expanded on the router, not here
+#  SC2059  printf formats built from trusted literals
+#  SC1090 SC1091  sourced files exist only on the router
+disable=SC2086,SC2154,SC2034,SC3045,SC2015,SC2016,SC2059,SC1090,SC1091,SC2181
+#  SC2329  validators/handlers are called through variables (ask VAR "…" default v_ip)
+#  SC2029  remote commands are deliberately expanded on the computer side
+#  SC2012  `ls -t` only picks the newest pairing file in the current folder
+disable=SC2329,SC2029,SC2012

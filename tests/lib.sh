@@ -20,7 +20,7 @@ fixture() {   # fixture [mkdb options…] — a fresh fake OpenWrt router
   for f in wireless system dhcp firewall network; do echo "# test" > "/etc/config/$f"; done
   echo "Test Router" > /tmp/sysinfo/model
   cp "$T/mock/bin/ipcalc.sh" /bin/ipcalc.sh
-  printf 'wpad-mbedtls\nusteer\nucode\nluci-base\nluci-app-usteer\n' > "$MOCK_STATE/apk.installed"
+  printf '%s\nusteer\nucode\nluci-base\nluci-app-usteer\n' "${WPAD:-wpad-mbedtls}" > "$MOCK_STATE/apk.installed"
   python3 "$T/mock/mkdb.py" "$MOCK_STATE/live.json" "$@"
 }
 

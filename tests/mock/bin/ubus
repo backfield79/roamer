@@ -1,2 +1,24 @@
 #!/bin/sh
+# network.wireless status: every wifi-iface is up (MOCK_WIFI_FAIL=1: hostapd refused the config → no ifname)
+case "$*" in
+  *"network.wireless status"*)
+    python3 - <<'PY'
+import json, os
+d = json.load(open(os.environ['MOCK_STATE'] + '/live.json'))
+fail = os.environ.get('MOCK_WIFI_FAIL') == '1'
+out = {}
+for s in d['order']:
+    if d['t'][s] == 'wifi-device':
+        out[s.split('.')[1]] = {'up': True, 'interfaces': []}
+for s in d['order']:
+    if d['t'][s] == 'wifi-iface':
+        r = d['o'][s].get('device'); n = s.split('.')[1]
+        if r in out:
+            i = {'section': n}
+            if not fail: i['ifname'] = 'phy%s-%s' % (r[-1], n)
+            out[r]['interfaces'].append(i)
+print(json.dumps(out))
+PY
+    ;;
+esac
 exit 0

@@ -93,6 +93,27 @@ run rmenu '\n2\n' "" RS_MODE=router
 has rmenu "Report — what is set up here" "router home menu"
 has rmenu "role|Gateway" "report printed"
 
+echo "== basic wpad on the router: swapped for the full one (apk 'provides' must not fool the check)"
+WPAD=wpad-basic-mbedtls fixture lanip=192.168.2.1 hostname=gw2
+# welcome · menu · backup · [router] device · install bundle y · pause · mobility domain · plan
+# shellcheck disable=SC2086
+run wpad '\n\n\n\ny\n\n\ny\n' "" RS_MODE=ws ROUTER=192.168.2.1 ROLE=gateway BANDS=both COUNTRY=NL $WIFI \
+  SSID=MyHome KEY=homepass1 ENC=sae-mixed HIDDEN=0 ROAM_DBM=-70 MOCK_BRIP=192.168.2.1/24
+has wpad "wpad-mbedtls  (full hostapd, replaces wpad-basic-mbedtls)" "basic wpad detected as not full"
+file_has "$MOCK_STATE/apk.installed" "wpad-mbedtls" "full wpad installed"
+if grep -qx wpad-basic-mbedtls "$MOCK_STATE/apk.installed"; then nok "basic wpad removed"; else ok "basic wpad removed"; fi
+uci_is wireless.default_radio1.bss_transition 1 "802.11v on with the full wpad"
+has wpad "Gateway is set up successfully" "set up"
+
+echo "== Wi-Fi refuses to start → the Gateway rolls its Wi-Fi back"
+fixture lanip=192.168.2.1 hostname=gw3
+# shellcheck disable=SC2086
+run wifail '\n\n\n\n\ny\n' "" RS_MODE=ws ROUTER=192.168.2.1 ROLE=gateway BANDS=both COUNTRY=NL $WIFI \
+  SSID=MyHome KEY=homepass1 ENC=sae-mixed HIDDEN=0 ROAM_DBM=-70 MOCK_BRIP=192.168.2.1/24 MOCK_WIFI_FAIL=1 WIFI_WAIT=6
+has wifail "Wi-Fi did not start" "Wi-Fi failure detected"
+has wifail "ROLLED BACK: Wi-Fi settings restored" "Wi-Fi rolled back"
+hasnt wifail "Gateway is set up successfully" "no false success"
+
 echo
 echo "passed: $PASS   failed: $FAIL"
 [ "$FAIL" = 0 ]

@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: ShellCheck + syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ShellCheck (POSIX sh — the router side runs on busybox ash)
+        run: shellcheck -s sh roaming-setup.sh tests/run.sh tests/lib.sh tests/mock/bin/ip tests/mock/bin/ping tests/mock/bin/ssh tests/mock/bin/udhcpc
+      - name: ShellCheck (bash image-build helpers)
+        run: shellcheck image-build/*.sh
+      - name: busybox ash syntax
+        run: docker run --rm -v "$PWD:/src:ro" alpine:3.20 sh -n /src/roaming-setup.sh
+
+  test:
+    name: Mocked router tests (Alpine / busybox ash)
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run test suite in a throwaway container
+        run: sh tests/run.sh

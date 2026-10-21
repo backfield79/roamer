@@ -3,6 +3,25 @@
 All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow `VERSION` in `roaming-setup.sh`.
 
+## [8.1] — 2026-10-21
+
+### Fixed
+- **Wi-Fi gone after a run on a router with `wpad-basic-*`.** With apk, `wpad-basic-*` *provides*
+  the virtual names `hostapd` and `wpa-supplicant`, so `apk info -e hostapd` succeeded and Roamer
+  thought a full hostapd was installed. It skipped the swap and enabled 802.11v (`bss_transition`),
+  which basic hostapd is compiled without — hostapd then rejects the whole AP config. Package checks
+  now match exact installed package names, and after the swap `wpad` is restarted.
+- `bss_transition` is set only when a full hostapd is really installed.
+- Channel lists are written as `channels` (read by both the shell and the ucode wifi-scripts;
+  `chanlist` was ignored by the shell variant).
+
+### Added
+- **Wi-Fi check after applying**: every roaming network must actually broadcast within 90 s
+  (160 s with DFS channels). If not, the Gateway rolls its Wi-Fi back and a Dumb AP rolls back
+  completely; the reason from the hostapd log is shown. `WIFI_WAIT=<s>` overrides the wait.
+- `diag` shows the installed wpad, hostapd features, radio/interface state and recent hostapd
+  log lines; the report shows `802.11r/k/v` only when 802.11v is really on.
+
 ## [8.0] — 2026-10-17
 
 First public release.

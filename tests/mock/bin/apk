@@ -1,7 +1,11 @@
 #!/bin/sh
+# like apk v3: wpad-basic-* also *provides* "hostapd" and "wpa-supplicant" (a virtual match for `info -e`)
 db="$MOCK_STATE/apk.installed"
 case "$1" in
-  info) grep -qx "$3" "$db" ;;
+  info) [ "$2" = -e ] || exit 1
+        grep -qx "$3" "$db" && exit 0
+        case "$3" in hostapd|wpa-supplicant) grep -q '^wpad' "$db";; *) exit 1;; esac ;;
+  list) sed 's/$/-2025.08.26-r1 x86_64 {hostapd} (BSD) [installed]/' "$db" ;;
   search) echo "$2-1.0-r1" ;;
   update) exit 0 ;;
   add) shift; for p; do echo "$p" >> "$db"; done ;;

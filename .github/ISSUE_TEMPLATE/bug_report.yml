@@ -1,0 +1,54 @@
+name: Bug report
+description: Something went wrong while setting up a Gateway or Dumb AP
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! **Remove Wi-Fi passwords and pairing codes (`ROAM1:…`) from anything you paste.**
+  - type: input
+    id: version
+    attributes:
+      label: Roamer version
+      description: First line of the welcome screen, or `grep ^VERSION roaming-setup.sh`
+      placeholder: "8.0"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Router model(s) and OpenWrt release
+      description: Shown on the "This router" screen
+      placeholder: "Gateway: Netgear XR500, 25.12.5 · Dumb AP: Linksys EA7500 v1, 25.12.5"
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: Which run?
+      options: [Gateway, Dumb AP, lantest, other]
+    validations:
+      required: true
+  - type: textarea
+    id: wiring
+    attributes:
+      label: Wiring
+      description: Which port of which router is cabled where, and where your computer was.
+      placeholder: "Gateway LAN2 → Dumb AP WAN; computer on Gateway LAN1"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Attach the `roaming-setup_…_err.log` / `_ok.log` from your folder. For a Dumb AP also
+        `./roaming-setup.sh status` and `./roaming-setup.sh diag`; if a cabled computer can't
+        reach it, the `roaming-lantest_…txt` from `./roaming-setup.sh lantest`.
+      render: text

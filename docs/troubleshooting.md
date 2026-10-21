@@ -7,6 +7,43 @@ computer has no address in that network*. It then tries the router over IPv6 lin
 offers **retry**, **another address** or **go through the Gateway** (log in to the Gateway once,
 every connection hops through it).
 
+## Wi-Fi gone after a run (LuCI shows "802.11s? Install mesh wpad")
+
+That LuCI text is only a link next to "Mode" whenever the installed wpad has no mesh support. It
+is not the problem; don't install `wpad-mesh-*` (it conflicts with the others and also lacks
+802.11v).
+
+The usual cause, fixed in 8.1: the router had `wpad-basic-*`, Roamer 8.0 and older didn't swap it
+for the full wpad but enabled 802.11v (`bss_transition`), and basic hostapd refuses that whole AP
+config. On the router:
+
+```sh
+# 1. which wpad is installed, and what can hostapd do?
+apk list --installed | grep -E '^(wpad|hostapd)'          # opkg: opkg list-installed | grep wpad
+for f in 11r acs sae mesh; do hostapd -v$f >/dev/null 2>&1 && echo "hostapd: $f"; done
+
+# 2. get Wi-Fi back right away: switch 802.11v off on every network that has it
+for s in $(uci show wireless | sed -n "s/^wireless\.\([^.]*\)\.bss_transition='1'$/\1/p"); do
+  uci set wireless.$s.bss_transition=0; done
+uci commit wireless; wifi
+
+# 3. install the full wpad, restart it, switch 802.11v back on
+apk del wpad-basic-mbedtls && apk add wpad-mbedtls      # opkg: opkg remove … && opkg install …
+/etc/init.d/wpad restart
+for s in $(uci show wireless | sed -n "s/^wireless\.\([^.]*\)\.ieee80211r='1'$/\1/p"); do
+  uci set wireless.$s.bss_transition=1; done
+uci commit wireless; wifi
+```
+
+If the log mentions `ACS` or `survey`, the radio's driver can't pick channels by itself: give it a
+fixed one (`uci set wireless.radio1.channel=36; uci -q delete wireless.radio1.channels;
+uci commit wireless; wifi`).
+
+Still nothing? `logread -e hostapd | tail -30` names the refused option, and `./roaming-setup.sh diag`
+shows radios, interfaces and hostapd features. Roamer 8.1 checks after applying that every roaming
+network really broadcasts, and rolls the Wi-Fi back if it doesn't. If LuCI keeps showing old hints
+after a package change, log out and in again; it caches the hostapd feature list per session.
+
 ## Laptop on a Dumb AP's LAN port: internet works, the Dumb AP doesn't answer
 
 Frames between that port and the Gateway are switched fine, but the path between that port and the

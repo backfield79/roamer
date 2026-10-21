@@ -1,0 +1,4 @@
+# Shell scripts must keep LF line endings — busybox ash on the router chokes on CRLF
+* text=auto eol=lf
+*.sh text eol=lf
+tests/mock/bin/* text eol=lf

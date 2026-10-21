@@ -1,5 +1,5 @@
 #!/bin/sh
-# Roamer — seamless Wi-Fi roaming for OpenWrt: 802.11r (FT) + 802.11k/v + usteer.        v8.0
+# Roamer — seamless Wi-Fi roaming for OpenWrt: 802.11r (FT) + 802.11k/v + usteer.        v8.1
 # https://github.com/OWNER/roamer · MIT License · POSIX sh / busybox ash
 # Works on any OpenWrt 24.10/25.12 router with a 2.4 and/or 5 GHz radio. Docs: README.md, docs/
 #
@@ -20,10 +20,10 @@
 #   MD keep|derive|gen|<4 hex>   ROAM_DBM -70   NAME (Dumb AP hostname)
 #   Dumb AP: AP_ADDR static|dhcp  AP_IP  GW_IP  NETMASK  MGMT_IP <ip>|off  (BRIDGE_WAN=1: experts only)
 #            CONFIRM_TIMEOUT 300  FORCE_AP=1
-#   DRY_RUN=1  ASSUME_YES=1  GUARD=0  PING_HOST 1.1.1.1  CLEAR=0  NO_COLOR=1  COLS <n>
+#   DRY_RUN=1  ASSUME_YES=1  GUARD=0  PING_HOST 1.1.1.1  WIFI_WAIT <s>  CLEAR=0  NO_COLOR=1  COLS <n>
 set -eu
 
-VERSION=8.0
+VERSION=8.1
 NAME_SET=0; [ -n "${NAME+x}" ] && NAME_SET=1
 TS="$(date +%Y%m%d-%H%M%S)"
 DRY_RUN="${DRY_RUN:-0}"; GUARD="${GUARD:-1}"; PING_HOST="${PING_HOST:-1.1.1.1}"
@@ -835,7 +835,7 @@ ws_setup() {
   { echo "export WS=1 BACKUP=no NOLOG=1 COLS=$COLS"; [ -z "${NO_COLOR:-}" ] || echo "export NO_COLOR=1"
     for v in ROLE PAIR TAILSCALE BANDS COUNTRY IFACE_2G IFACE_5G CH2 CH5 HT2 HT5 TXP2 TXP5 SSID KEY ENC HIDDEN MD \
              ROAM_DBM NAME AP_ADDR AP_IP GW_IP NETMASK BRIDGE_WAN MGMT_IP TS_ACCEPT CONFIRM_TIMEOUT FORCE_AP \
-             DRY_RUN ASSUME_YES GUARD PING_HOST CLEAR; do
+             DRY_RUN ASSUME_YES GUARD PING_HOST CLEAR WIFI_WAIT; do
       if isset "$v"; then echo "export $v=$(squote "$(getv "$v")")"; fi
     done; } | rsh 'umask 077; cat > /tmp/roaming-env'
   tflag="-t"; [ $TTY = 1 ] || tflag="-T"
@@ -917,11 +917,11 @@ report() {   # key|value lines describing this router's roaming setup
     _r="$(iget "$_s" device)"; _b="$(uci -q get "wireless.$_r.band" || echo ?)"
     _c="$(opchan "$_r" || true)"; [ -n "$_c" ] || _c="$(uci -q get "wireless.$_r.channel" || echo auto) (starting)"
     _hd=""; [ "$(iget "$_s" hidden)" = 1 ] && _hd=" hidden"
-    echo "Wi-Fi $_b|ch $_c · '$(iget "$_s" ssid)'$_hd · $(iget "$_s" encryption) · MD $(iget "$_s" mobility_domain) · 802.11r/k/v"
+    echo "Wi-Fi $_b|ch $_c · '$(iget "$_s" ssid)'$_hd · $(iget "$_s" encryption) · MD $(iget "$_s" mobility_domain) · 802.11r/k$([ "$(iget "$_s" bss_transition)" = 1 ] && echo /v)"
   done
   _us=stopped; pgrep -x usteer >/dev/null 2>&1 && _us=running
   echo "steering|usteer $_us · steer below $(uci -q get usteer.@usteer[0].roam_trigger_snr 2>/dev/null || echo ?) dBm"
-  _pk="$( { sed -n 's/^P://p' /lib/apk/db/installed; sed -n 's/^Package: //p' /usr/lib/opkg/status; } 2>/dev/null \
+  _pk="$( { sed -n 's/^P://p' /lib/apk/db/installed; sed -n 's/^Package: //p' /usr/lib/opkg/status; apk list --installed 2>/dev/null | sed 's/-[0-9].*//'; } 2>/dev/null \
          | grep -E '^(wpad|hostapd|usteer|luci-app-usteer|tailscale)' | sort -u | tr '\n' ' ')"
   [ -z "$_pk" ] || echo "packages|$_pk"
   _u="$(readlink /etc/roaming-setup.bak/restore-latest.sh 2>/dev/null || true)"
@@ -948,6 +948,16 @@ diag() {   # what a cable on this router sees — run it while the laptop is plu
     echo "-- tailscale"; tailscale debug prefs 2>/dev/null | grep -E '"(RouteAll|AdvertiseRoutes|ExitNodeID)"' | sed 's/^ */   /'
     ip -4 route show table 52 2>/dev/null | grep -v '^100\.' | sed 's/^/   table 52: /'
   fi
+  echo "-- Wi-Fi"
+  echo "   wpad: $( { sed -n 's/^P://p' /lib/apk/db/installed; sed -n 's/^Package: //p' /usr/lib/opkg/status; } 2>/dev/null | grep -E '^(wpad|hostapd)' | sort -u | tr '\n' ' ')"
+  _f=""; for _x in 11r 11ax acs sae mesh; do hostapd -v"$_x" >/dev/null 2>&1 && _f="$_f $_x"; done; echo "   hostapd features:${_f:- ?}"
+  _ws="$(ubus call network.wireless status 2>/dev/null)"
+  for _r in $(sections wireless wifi-device); do
+    echo "   $_r up=$(jf "$_ws" "@.$_r.up") ch=$(uci -q get "wireless.$_r.channel") list=$(uci -q get "wireless.$_r.channels" || uci -q get "wireless.$_r.chanlist" || echo -) country=$(uci -q get "wireless.$_r.country" || echo -)"
+    for _n in $(jsonfilter -s "$_ws" -e "@.$_r.interfaces[*].ifname" 2>/dev/null); do
+      echo "     $_n: $(iwinfo "$_n" info 2>/dev/null | sed -n 's/.*\(Mode: [A-Za-z]*\).*/\1/p' | head -n1)"; done
+  done
+  logread -e hostapd 2>/dev/null | tail -n 8 | sed 's/^/   log: /'
   echo "-- ssh server"; uci -q show dropbear | sed 's/^/   /'
   (netstat -ltn 2>/dev/null || ss -ltn 2>/dev/null) | grep ':22 ' | sed 's/^/   /'
 }
@@ -1087,7 +1097,12 @@ P1="${P1:-lan1}"
 
 # package manager
 if command -v apk >/dev/null 2>&1; then PM=apk; elif command -v opkg >/dev/null 2>&1; then PM=opkg; else PM=none; fi
-pkg_has()   { case $PM in apk) apk info -e "$1" >/dev/null 2>&1 || grep -qx "P:$1" /lib/apk/db/installed 2>/dev/null;; opkg) opkg list-installed "$1" 2>/dev/null | grep -q "^$1 ";; *) return 1;; esac; }
+# exact package names only: with apk, wpad-basic-* *provides* "hostapd"/"wpa-supplicant", so
+# `apk info -e hostapd` is true on a basic build — that once made Roamer skip the full-wpad swap
+pkg_has()   { case $PM in
+                apk)  grep -qx "P:$1" /lib/apk/db/installed 2>/dev/null || apk list --installed 2>/dev/null | grep -q "^$1-[0-9]";;
+                opkg) opkg list-installed "$1" 2>/dev/null | grep -q "^$1 ";;
+                *) return 1;; esac; }
 pkg_avail() { case $PM in apk) apk search "$1" 2>/dev/null | grep -q "^$1-[0-9]";; opkg) opkg list "$1" 2>/dev/null | grep -q "^$1 - ";; *) return 1;; esac; }
 pkg_update(){ case $PM in apk) apk update;; opkg) opkg update;; *) return 1;; esac; }
 pkg_add()   { case $PM in apk) apk add "$@";; opkg) opkg install "$@";; *) return 1;; esac; }
@@ -1366,7 +1381,8 @@ if [ -n "$R_NEED" ] || [ "$TAILSCALE" = yes ]; then
       esac
       if [ "$p" = "$want_full" ] && [ -n "$basic" ]; then
         say "  installing $p (replacing $basic) …"
-        if pkg_del "$basic" >/dev/null 2>&1 && pkg_add "$p" >/dev/null 2>&1; then okl "$p"
+        if pkg_del "$basic" >/dev/null 2>&1 && pkg_add "$p" >/dev/null 2>&1 && pkg_has "$p" && ! pkg_has "$basic"; then
+          okl "$p"; [ ! -x /etc/init.d/wpad ] || /etc/init.d/wpad restart >/dev/null 2>&1 || true
         else pkg_add "$basic" >/dev/null 2>&1 || true; die "could not install $p ($basic restored)"; fi
       else
         say "  installing $p …"; pkg_add "$p" >/dev/null 2>&1 && okl "$p" || die "could not install $p"
@@ -1383,6 +1399,12 @@ if [ -n "$R_NEED" ] || [ "$TAILSCALE" = yes ]; then
   fi
   pause
 fi
+
+# full hostapd present (exact package)? Only then 802.11v (bss_transition): a basic build is compiled
+# without it and refuses the whole AP config — no Wi-Fi at all.
+WNM=0; for p in $FULLW; do pkg_has "$p" && { WNM=1; break; }; done
+[ "$DRY_RUN" != 1 ] || [ -z "$R_NEED" ] || WNM=1          # dry run: the plan assumes the install happens
+[ "$WNM" = 1 ] || wrn "no full hostapd — 802.11v (BSS transition) stays off; 802.11r/k still work"
 
 # ---------------------------------------------------------------- 6. bands
 CH=Wi-Fi
@@ -1799,9 +1821,9 @@ echo "$PLAN" | while IFS='|' read -r r band iface isnew uplink ch ht txp; do
     [ "$COUNTRY" = keep ] || uci set wireless.$r.country="$COUNTRY"
     case "$ch" in
       keep) ;;
-      auto) uci set wireless.$r.channel='auto'; uci -q delete wireless.$r.chanlist || true
-            for c in $(autolist "$band"); do uci add_list wireless.$r.chanlist="$c"; done ;;
-      *)    uci set wireless.$r.channel="$ch"; uci -q delete wireless.$r.chanlist || true ;;
+      auto) uci set wireless.$r.channel='auto'; uci -q delete wireless.$r.chanlist || true; uci -q delete wireless.$r.channels || true
+            for c in $(autolist "$band"); do uci add_list wireless.$r.channels="$c"; done ;;
+      *)    uci set wireless.$r.channel="$ch"; uci -q delete wireless.$r.chanlist || true; uci -q delete wireless.$r.channels || true ;;
     esac
     [ "$ht" = keep ] || uci set wireless.$r.htmode="$ht"
     case "$txp" in keep) ;; max) uci -q delete wireless.$r.txpower || true ;; *) uci set wireless.$r.txpower="$txp" ;; esac
@@ -1824,7 +1846,7 @@ echo "$PLAN" | while IFS='|' read -r r band iface isnew uplink ch ht txp; do
   uci -q delete wireless.$iface.ft_psk_generate_local || true
   uci set wireless.$iface.reassociation_deadline='20000'
   uci set wireless.$iface.ieee80211k='1'
-  uci set wireless.$iface.bss_transition='1'
+  if [ "$WNM" = 1 ]; then uci set wireless.$iface.bss_transition='1'; else uci -q delete wireless.$iface.bss_transition || true; fi
   lg "staged $r ($band) -> $iface"
 done
 if [ ! -f /etc/config/usteer ] && [ "$DRY_RUN" != 1 ]; then touch /etc/config/usteer; fi
@@ -1915,6 +1937,17 @@ COMMITTED=1
 /etc/init.d/usteer enable
 
 # ================================================================ apply: Dumb AP
+wifi_up() {   # every roaming Wi-Fi network is actually broadcasting (hostapd accepted its config)
+  _ws="$(ubus call network.wireless status 2>/dev/null)" || return 1
+  printf '%s\n' "$PLAN" | { while IFS='|' read -r _r _b _if _n _u _c _h _t; do
+    [ -n "$_r" ] || continue
+    _ifn="$(jsonfilter -s "$_ws" -e "@.$_r.interfaces[@.section='$_if'].ifname" 2>/dev/null | head -n1)"
+    [ -n "$_ifn" ] && iwinfo "$_ifn" info 2>/dev/null | grep -q 'Mode: Master' || exit 1
+  done; exit 0; }
+}
+WIFI_MAX="${WIFI_WAIT:-90}"; isset WIFI_WAIT || case " $(autolist 5g 2>/dev/null) $(printf '%s' "$PLAN" | cut -d'|' -f6 | tr '\n' ' ') " in *" 1"[0-4][0-9]" "*|*" 5"[2-9]" "*|*" 6"[0-4]" "*) WIFI_MAX=160;; esac   # DFS: 60 s radar check
+wifi_wait() { _d=$(( $(date +%s) + WIFI_MAX )); while [ "$(date +%s)" -lt "$_d" ]; do wifi_up && return 0; sleep 3; done; return 1; }
+wifi_why() { logread -e hostapd 2>/dev/null | grep -iE 'unknown|invalid|fail|error|could not' | tail -n 3 | sed 's/^.*hostapd[^:]*: *//' | tr '\n' ' '; }
 LOGIN_RE='[Aa]uth succeeded|accepted login'
 logins() { logread -e "$LOGIN_RE" 2>/dev/null | wc -l; }
 brok() {   # every LAN port is in br-lan — carrier is NOT required (cables may be moving right now)
@@ -2022,6 +2055,8 @@ if [ "$ROLE" = ap ]; then
     fi
     alog "self-check OK: br-lan $(ip -4 -o addr show br-lan | awk '{print $4}' | tr '\n' ' ')· ports $(ls "$SYSNET/br-lan/brif" | tr '\n' ' ')"
     [ "$TMPWAN" = 0 ] || alog "temporary way in: WAN $(ip -4 -o addr show "$wdev" 2>/dev/null | awk '{print $4}' | head -n1)"
+    st "applying|||starting Wi-Fi (DFS channels need ~60 s)"
+    if wifi_wait; then alog "Wi-Fi is up on: $SEL"; else rollback "Wi-Fi did not start — hostapd: $(wifi_why)"; fi
     DL=$(( $(date +%s) + CONFIRM_TIMEOUT ))
     n0="$(logins)"; t=0; ok=0; last=""; how=""; msg=""
     while :; do
@@ -2061,20 +2096,23 @@ was_ok=0; if health; then was_ok=1; fi
 log "applying (internet before: $([ $was_ok = 1 ] && echo up || echo DOWN))"
 ubus call network reload
 sleep 3; /etc/init.d/usteer restart
-ok=1
-if [ "$GUARD" = 1 ] && [ "$was_ok" = 1 ]; then
+ok=1; WHY=""
+say "  ${D}waiting for Wi-Fi to come up (up to ${WIFI_MAX}s) …${N}"
+if ! wifi_wait; then ok=0; WHY="Wi-Fi did not start — hostapd: $(wifi_why)"; fi
+if [ $ok = 1 ] && [ "$GUARD" = 1 ] && [ "$was_ok" = 1 ]; then
   t=0; while [ $t -lt 45 ]; do health && break; sleep 3; t=$((t+3)); done
-  health || ok=0
+  health || { ok=0; WHY="internet lost after apply"; }
 fi
 if [ $ok = 0 ]; then
-  log "FAIL: internet lost after apply — rolling back wireless/usteer/system from $SNAP"
+  log "FAIL: $WHY — rolling back wireless/usteer/system from $SNAP"
   cp "$SNAP/wireless" /etc/config/wireless; cp "$SNAP/system" /etc/config/system
   [ ! -x /etc/init.d/system ] || /etc/init.d/system reload 2>/dev/null || true
   if [ -f "$SNAP/usteer" ]; then cp "$SNAP/usteer" /etc/config/usteer; else rm -f /etc/config/usteer; fi
   [ -f "$SNAP/.usteer_was_enabled" ] || { /etc/init.d/usteer stop; /etc/init.d/usteer disable; } 2>/dev/null || true
   ubus call network reload
   t=0; while [ $t -lt 45 ]; do health && break; sleep 3; t=$((t+3)); done
-  if health; then log "ROLLED BACK: internet restored — cause is the Wi-Fi change. Send: logread | grep -E 'netifd|hostapd'"
+  if [ "$WHY" != "internet lost after apply" ]; then log "ROLLED BACK: Wi-Fi settings restored. Details: logread -e hostapd"
+  elif health; then log "ROLLED BACK: internet restored — cause is the Wi-Fi change. Send: logread | grep -E 'netifd|hostapd'"
   else log "STILL DOWN after rollback — not the Wi-Fi change: 'network reload' applied network/firewall config from disk that differed from what was running. Check: logread | grep -E 'netifd|udhcpc|pppd'; ifstatus wan."; fi
   exit 1
 fi

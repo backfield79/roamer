@@ -1,0 +1,19 @@
+# Files Roamer writes into the folder it runs from — they contain configs, logs and Wi-Fi passwords
+roaming-setup_*
+roaming-pair_*.txt
+roaming-hosts.txt
+roaming-lantest_*
+*.tar.gz
+*.log
+*.log.part
+
+# image builds
+image-build/out/
+image-build/ib-*/
+out/
+
+# editors / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
