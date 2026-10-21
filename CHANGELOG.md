@@ -3,6 +3,22 @@
 All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow `VERSION` in `roaming-setup.sh`.
 
+## [8.3] — 2026-10-21
+
+### Fixed
+- **The 802.11v fallback didn't work**: OpenWrt 25.12's wifi scripts pass `bss_transition` to hostapd
+  whenever the option is *set*, also as `0`, and a hostapd without 802.11v rejects the key itself.
+  The fallback now removes the option, so Wi-Fi comes up (802.11r/k still on).
+- The failure reason contained old log lines (an earlier run's message): only hostapd's own lines
+  since this run are used now.
+- A hostapd refusal is seen within seconds instead of after the full 90 s wait.
+
+### Added
+- Roamer asks the binaries instead of package names: the config parser of a hostapd with 802.11v
+  contains the literal `bss_transition`. If the installed hostapd has it but the *running* one
+  (`/proc/<pid>/exe`) doesn't, `wpad` is restarted before applying. When 802.11v ends up off, the
+  run says which packages and binaries it found; `diag` shows the same.
+
 ## [8.2] — 2026-10-21
 
 ### Fixed

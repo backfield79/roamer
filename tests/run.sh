@@ -127,7 +127,8 @@ run nownm '\n\n\n\n\ny\n' "" RS_MODE=ws ROUTER=192.168.2.1 ROLE=gateway BANDS=bo
 has nownm "retrying without it" "bss_transition refusal recognised"
 has nownm "Gateway is set up successfully" "set up anyway"
 has nownm "802.11v is off" "user told 802.11v is off and why"
-uci_is wireless.default_radio1.bss_transition 0 "bss_transition switched off"
+uci_is wireless.default_radio1.bss_transition '<unset>' "bss_transition removed (=0 is still refused by such a hostapd)"
+has nownm "unknown configuration item 'bss_transition'" "hostapd's own reason shown"
 
 echo
 echo "passed: $PASS   failed: $FAIL"

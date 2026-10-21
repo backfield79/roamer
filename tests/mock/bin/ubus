@@ -16,7 +16,7 @@ for s in d['order']:
         r = d['o'][s].get('device'); n = s.split('.')[1]
         if r in out:
             i = {'section': n}
-            if not fail and not (nownm and d['o'][s].get('bss_transition') == '1'): i['ifname'] = 'phy%s-%s' % (r[-1], n)
+            if not fail and not (nownm and 'bss_transition' in d['o'][s]): i['ifname'] = 'phy%s-%s' % (r[-1], n)
             out[r]['interfaces'].append(i)
 print(json.dumps(out))
 PY

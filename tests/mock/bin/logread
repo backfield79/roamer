@@ -1,7 +1,9 @@
 #!/bin/sh
-# hostapd's complaint when it lacks 802.11v (MOCK_WIFI_NOWNM=1) or refuses the config (MOCK_WIFI_FAIL=1)
-case "$*" in *hostapd*)
-  [ "${MOCK_WIFI_NOWNM:-}" != 1 ] || echo "daemon.err hostapd: Line 41: unknown configuration item 'bss_transition'"
-  [ "${MOCK_WIFI_FAIL:-}" != 1 ] || echo "daemon.err hostapd: Line 12: invalid channel" ;;
-esac
+# system log stand-in: hostapd's complaint when it lacks 802.11v (MOCK_WIFI_NOWNM=1, only while a network
+# still has bss_transition set) or refuses the config outright (MOCK_WIFI_FAIL=1)
+if [ "${MOCK_WIFI_NOWNM:-}" = 1 ] && python3 "$(dirname "$0")/uci.py" show wireless 2>/dev/null | grep -q '\.bss_transition='; then
+  echo "daemon.err hostapd: Line 41: unknown configuration item 'bss_transition'"
+  echo "daemon.err hostapd: 1 errors found in configuration file '<inline>'"
+fi
+[ "${MOCK_WIFI_FAIL:-}" != 1 ] || echo "daemon.err hostapd: Line 12: invalid channel"
 exit 0

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Roamer — seamless Wi-Fi roaming for OpenWrt: 802.11r (FT) + 802.11k/v + usteer.        v8.2
+# Roamer — seamless Wi-Fi roaming for OpenWrt: 802.11r (FT) + 802.11k/v + usteer.        v8.3
 # https://github.com/OWNER/roamer · MIT License · POSIX sh / busybox ash
 # Works on any OpenWrt 24.10/25.12 router with a 2.4 and/or 5 GHz radio. Docs: README.md, docs/
 #
@@ -23,7 +23,7 @@
 #   DRY_RUN=1  ASSUME_YES=1  GUARD=0  PING_HOST 1.1.1.1  WIFI_WAIT <s>  CLEAR=0  NO_COLOR=1  COLS <n>
 set -eu
 
-VERSION=8.2
+VERSION=8.3
 NAME_SET=0; [ -n "${NAME+x}" ] && NAME_SET=1
 TS="$(date +%Y%m%d-%H%M%S)"
 DRY_RUN="${DRY_RUN:-0}"; GUARD="${GUARD:-1}"; PING_HOST="${PING_HOST:-1.1.1.1}"
@@ -967,7 +967,7 @@ report() {   # key|value lines describing this router's roaming setup
   done
   _us=stopped; pgrep -x usteer >/dev/null 2>&1 && _us=running
   echo "steering|usteer $_us · steer below $(uci -q get usteer.@usteer[0].roam_trigger_snr 2>/dev/null || echo ?) dBm"
-  _pk="$( { sed -n 's/^P://p' /lib/apk/db/installed; sed -n 's/^Package: //p' /usr/lib/opkg/status; apk list --installed 2>/dev/null | sed 's/-[0-9].*//'; } 2>/dev/null \
+  _pk="$( { { sed -n 's/^P://p' /lib/apk/db/installed || true; }; { sed -n 's/^Package: //p' /usr/lib/opkg/status || true; }; { apk list --installed 2>/dev/null | sed 's/-[0-9].*//' || true; }; } 2>/dev/null \
          | grep -E '^(wpad|hostapd|usteer|luci-app-usteer|tailscale)' | sort -u | tr '\n' ' ')"
   [ -z "$_pk" ] || echo "packages|$_pk"
   _u="$(readlink /etc/roaming-setup.bak/restore-latest.sh 2>/dev/null || true)"
@@ -995,8 +995,13 @@ diag() {   # what a cable on this router sees — run it while the laptop is plu
     ip -4 route show table 52 2>/dev/null | grep -v '^100\.' | sed 's/^/   table 52: /'
   fi
   echo "-- Wi-Fi"
-  echo "   wpad: $( { sed -n 's/^P://p' /lib/apk/db/installed; sed -n 's/^Package: //p' /usr/lib/opkg/status; } 2>/dev/null | grep -E '^(wpad|hostapd)' | sort -u | tr '\n' ' ')"
-  _f=""; for _x in 11r 11ax acs sae mesh; do hostapd -v"$_x" >/dev/null 2>&1 && _f="$_f $_x"; done; echo "   hostapd features:${_f:- ?}"
+  echo "   wpad: $( { { sed -n 's/^P://p' /lib/apk/db/installed || true; }; { apk list --installed 2>/dev/null | sed 's/-[0-9].*//' || true; }; { sed -n 's/^Package: //p' /usr/lib/opkg/status || true; }; } 2>/dev/null | grep -E '^(wpad|hostapd)' | sort -u | tr '\n' ' ')"
+  _f=""; for _x in 11r 11ax acs sae mesh; do hostapd -v"$_x" >/dev/null 2>&1 && _f="$_f $_x"; done
+  _h="$(readlink -f /usr/sbin/hostapd 2>/dev/null)"; [ -r "$_h" ] && tr '\000' '\n' < "$_h" | grep -qx bss_transition && _f="$_f 11v"
+  echo "   hostapd features:${_f:- ?}"
+  for _p in $(pidof hostapd 2>/dev/null); do
+    _v=no; tr '\000' '\n' < "/proc/$_p/exe" 2>/dev/null | grep -qx bss_transition && _v=yes
+    echo "   running hostapd pid $_p: $(readlink "/proc/$_p/exe") · 802.11v=$_v"; done
   _ws="$(ubus call network.wireless status 2>/dev/null)"
   for _r in $(sections wireless wifi-device); do
     echo "   $_r up=$(jf "$_ws" "@.$_r.up") ch=$(uci -q get "wireless.$_r.channel") list=$(uci -q get "wireless.$_r.channels" || uci -q get "wireless.$_r.chanlist" || echo -) country=$(uci -q get "wireless.$_r.country" || echo -)"
@@ -1150,6 +1155,10 @@ pkg_has()   { case $PM in
                 apk)  grep -qx "P:$1" /lib/apk/db/installed 2>/dev/null || apk list --installed 2>/dev/null | grep -q "^$1-[0-9]";;
                 opkg) opkg list-installed "$1" 2>/dev/null | grep -q "^$1 ";;
                 *) return 1;; esac; }
+wpad_pkgs() { { { sed -n 's/^P://p' /lib/apk/db/installed || true; }; { apk list --installed 2>/dev/null | sed 's/-[0-9].*//' || true; }; { sed -n 's/^Package: //p' /usr/lib/opkg/status || true; }; } 2>/dev/null | grep -E '^(wpad|hostapd)' | sort -u | tr '\n' ' '; }
+# does this hostapd binary know 802.11v? Its config parser holds the literal "bss_transition" only when
+# 802.11v is compiled in (works on /proc/<pid>/exe too — i.e. on the hostapd that is RUNNING)
+bin_wnm() { [ -r "$1" ] && tr '\000' '\n' < "$1" 2>/dev/null | grep -qx bss_transition; }
 pkg_avail() { case $PM in apk) apk search "$1" 2>/dev/null | grep -q "^$1-[0-9]";; opkg) opkg list "$1" 2>/dev/null | grep -q "^$1 - ";; *) return 1;; esac; }
 pkg_update(){ case $PM in apk) apk update;; opkg) opkg update;; *) return 1;; esac; }
 pkg_add()   { case $PM in apk) apk add "$@";; opkg) opkg install "$@";; *) return 1;; esac; }
@@ -1450,10 +1459,12 @@ fi
 # full hostapd present (exact package)? Only then 802.11v (bss_transition): a basic build is compiled
 # without it and refuses the whole AP config — no Wi-Fi at all.
 WNM=0; for p in $FULLW; do pkg_has "$p" && { WNM=1; break; }; done
-if [ "$WNM" = 1 ] && [ -x /usr/sbin/hostapd ] && ! /usr/sbin/hostapd -vmesh >/dev/null 2>&1; then
-  WNM=0; wrn "a full wpad package is listed, but /usr/sbin/hostapd is not a full build"; fi
+HBIN="$(readlink -f /usr/sbin/hostapd 2>/dev/null || true)"
+# the binary itself: a positive answer is certain (the literal is in its config parser); a negative one
+# only means "not seen" — so it can switch 802.11v ON for an oddly named package, never OFF
+if [ "$WNM" = 0 ] && [ -n "$HBIN" ] && bin_wnm "$HBIN"; then WNM=1; fi
 [ "$DRY_RUN" != 1 ] || [ -z "$R_NEED" ] || WNM=1          # dry run: the plan assumes the install happens
-[ "$WNM" = 1 ] || wrn "no full hostapd — 802.11v (BSS transition) stays off; 802.11r/k still work"
+[ "$WNM" = 1 ] || wrn "802.11v (BSS transition) stays off on this router; 802.11r/k still work"
 
 # ---------------------------------------------------------------- 6. bands
 CH=Wi-Fi
@@ -1995,22 +2006,39 @@ wifi_up() {   # every roaming Wi-Fi network is actually broadcasting (hostapd ac
   done; exit 0; }
 }
 WIFI_MAX="${WIFI_WAIT:-90}"; isset WIFI_WAIT || case " $(autolist 5g 2>/dev/null) $(printf '%s' "$PLAN" | cut -d'|' -f6 | tr '\n' ' ') " in *" 1"[0-4][0-9]" "*|*" 5"[2-9]" "*|*" 6"[0-4]" "*) WIFI_MAX=160;; esac   # DFS: 60 s radar check
-wifi_wait() { _d=$(( $(date +%s) + WIFI_MAX )); while [ "$(date +%s)" -lt "$_d" ]; do wifi_up && return 0; sleep 3; done; return 1; }
-wpad_stale() {   # hostapd still running a binary that a package update replaced (it runs the deleted file)
-  for _p in $(pidof hostapd wpa_supplicant 2>/dev/null); do
-    readlink "/proc/$_p/exe" 2>/dev/null | grep -q '(deleted)' && return 0; done; return 1
+wifi_wait() {
+  _d=$(( $(date +%s) + WIFI_MAX ))
+  while [ "$(date +%s)" -lt "$_d" ]; do
+    wifi_up && return 0
+    hlog | tail -n +$((HLOG0 + 1)) | grep -qE 'errors found in configuration|add_iface failed' && { sleep 2; return 1; }
+    sleep 3
+  done; return 1
+}
+wpad_stale() {   # the RUNNING hostapd is not the installed one: replaced binary, or one without 802.11v
+  for _p in $(pidof hostapd 2>/dev/null); do
+    readlink "/proc/$_p/exe" 2>/dev/null | grep -q '(deleted)' && return 0
+    bin_wnm "${HBIN:-/nonexistent}" && ! bin_wnm "/proc/$_p/exe" && return 0      # installed has 802.11v, running hasn't
+  done; return 1
 }
 wpad_fresh() {   # make sure the hostapd that will read our config is the installed one
   wpad_stale || return 0
-  log "hostapd still runs the binary replaced by a package update — restarting wpad"
+  log "the running hostapd is not the installed one (replaced by a package update) — restarting wpad"
   /etc/init.d/wpad restart >/dev/null 2>&1 || true; sleep 3
 }
-drop_wnm() {     # last resort: this hostapd can't do 802.11v — switch it off on our networks
+hlog() { logread 2>/dev/null | grep -v 'roaming-setup' | grep -E 'hostapd|wpad' || true; }   # hostapd's own lines only
+HLOG0=0; hmark() { HLOG0="$(hlog | wc -l)"; }                    # remember where the log was before we applied
+drop_wnm() {     # this hostapd refuses 802.11v: remove the option entirely — the wifi scripts pass it
+                 # on whenever it is SET (even =0), and such a hostapd rejects the key itself
   printf '%s\n' "$PLAN" | while IFS='|' read -r _r _b _if _n _u _c _h _t; do
-    if [ -n "$_if" ]; then uci set "wireless.$_if.bss_transition=0"; fi; done
-  uci commit wireless; wifi >/dev/null 2>&1 || true
+    if [ -n "$_if" ]; then uci -q delete "wireless.$_if.bss_transition" || true; fi; done
+  uci commit wireless; hmark; wifi >/dev/null 2>&1 || true
 }
-wifi_why() { logread -e hostapd 2>/dev/null | grep -iE 'unknown|invalid|fail|error|could not' | tail -n 3 | sed 's/^.*hostapd[^:]*: *//' | tr '\n' ' '; }
+wifi_why() {     # hostapd's complaint since we applied (not older lines, not Roamer's own)
+  _w="$(hlog | tail -n +$((HLOG0 + 1)))"; [ -n "$_w" ] || _w="$(hlog | tail -n 20)"
+  printf '%s\n' "$_w" | grep -iE 'unknown|invalid|fail|error|could not' | sed -E 's/^.*(hostapd|wpad)[^:]*: *//' \
+    | awk '!seen[$0]++' | tail -n 3 | tr '\n' ' '
+}
+wnm_facts() { echo "installed: $(wpad_pkgs)· /usr/sbin/hostapd → ${HBIN:-?} 802.11v=$(bin_wnm "${HBIN:-/nonexistent}" && echo yes || echo no) · running: $(for _p in $(pidof hostapd 2>/dev/null); do printf '%s(802.11v=%s) ' "$(readlink "/proc/$_p/exe")" "$(bin_wnm "/proc/$_p/exe" && echo yes || echo no)"; done)"; }
 LOGIN_RE='[Aa]uth succeeded|accepted login'
 logins() { logread -e "$LOGIN_RE" 2>/dev/null | wc -l; }
 brok() {   # every LAN port is in br-lan — carrier is NOT required (cables may be moving right now)
@@ -2108,7 +2136,7 @@ if [ "$ROLE" = ap ]; then
     st "applying|||restarting the network"
     alog "Dumb AP conversion: stopping DHCP/RA + firewall, restarting network (snapshot $SNAP)"
     for s in odhcpd dnsmasq firewall; do /etc/init.d/$s stop || true; done
-    /etc/init.d/network restart; sleep 10
+    hmark; /etc/init.d/network restart; sleep 10
     sleep 3; wifi up || true
     sleep 5; /etc/init.d/usteer restart || true
     if ! brok; then alog "self-check: bridge incomplete ($(ls "$SYSNET/br-lan/brif" 2>/dev/null | tr '\n' ' ')) — reloading network"
@@ -2121,7 +2149,7 @@ if [ "$ROLE" = ap ]; then
     [ "$TMPWAN" = 0 ] || alog "temporary way in: WAN $(ip -4 -o addr show "$wdev" 2>/dev/null | awk '{print $4}' | head -n1)"
     st "applying|||starting Wi-Fi (DFS channels need ~60 s)"
     if wifi_wait; then alog "Wi-Fi is up on: $SEL"
-    elif wifi_why | grep -q bss_transition && { alog "this hostapd refuses 802.11v — retrying without it"; drop_wnm; wifi_wait; }; then
+    elif wifi_why | grep -q bss_transition && { alog "this hostapd refuses 802.11v — retrying without it · $(wnm_facts)"; drop_wnm; wifi_wait; }; then
       alog "Wi-Fi is up on: $SEL (802.11v off: install the full wpad, reboot, run again)"
     else rollback "Wi-Fi did not start — hostapd: $(wifi_why)"; fi
     DL=$(( $(date +%s) + CONFIRM_TIMEOUT ))
@@ -2161,7 +2189,7 @@ trap '' HUP
 step "Applying"
 was_ok=0; if health; then was_ok=1; fi
 log "applying (internet before: $([ $was_ok = 1 ] && echo up || echo DOWN))"
-wpad_fresh
+wpad_fresh; hmark
 ubus call network reload; sleep 2; wifi >/dev/null 2>&1 || true
 sleep 3; /etc/init.d/usteer restart
 ok=1; WHY=""; WNMOFF=0
@@ -2169,6 +2197,7 @@ say "  ${D}waiting for Wi-Fi to come up (up to ${WIFI_MAX}s) …${N}"
 if ! wifi_wait; then
   if wifi_why | grep -q bss_transition; then
     log "this hostapd refuses 802.11v (bss_transition) — retrying without it"
+    log "  hostapd: $(wifi_why)"; log "  $(wnm_facts)"
     drop_wnm; WNMOFF=1
     wifi_wait || { ok=0; WHY="Wi-Fi did not start — hostapd: $(wifi_why)"; }
   else ok=0; WHY="Wi-Fi did not start — hostapd: $(wifi_why)"; fi
@@ -2206,7 +2235,8 @@ step "Done" final
 out ""
 out "$(ctr "${GR}${B}✓  Gateway is set up successfully${N}")"
 out ""
-[ "$WNMOFF" = 0 ] || out "  ${YE}⚠${N} 802.11v is off: this router's hostapd can't do it. Install the full wpad, reboot, run again."
+[ "$WNMOFF" = 0 ] || { out "  ${YE}⚠${N} 802.11v is off: this router's hostapd can't do it (802.11r/k work)."
+  out "    $(wnm_facts)"; out "    Fix: install the full wpad, reboot, run Roamer again — see docs/troubleshooting.md"; }
 [ -z "$CHK" ] || out "  $CHK"
 out "  SSID '$SSID' ($([ "$HIDDEN" = 1 ] && echo hidden || echo visible)) · $ENC · MD $MD · steer < $ROAM_DBM dBm ·$chs"
 out ""

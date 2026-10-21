@@ -13,10 +13,20 @@ That LuCI text is only a link next to "Mode" whenever the installed wpad has no 
 is not the problem; don't install `wpad-mesh-*` (it conflicts with the others and also lacks
 802.11v).
 
-**Installed the full wpad and it still fails?** Replacing the package doesn't restart the running
-hostapd: it keeps executing the old basic binary (`ls -l /proc/$(pidof hostapd)/exe` shows
-`(deleted)`). Run `/etc/init.d/wpad restart; wifi` or reboot. Roamer 8.2 does this by itself, and if
-hostapd still refuses 802.11v it turns 802.11v off instead of failing.
+**Installed the full wpad and it still fails?** Ask the binaries — a hostapd with 802.11v has the
+literal `bss_transition` in its config parser:
+
+```sh
+tr '\000' '\n' < /usr/sbin/hostapd | grep -x bss_transition                 # installed hostapd
+tr '\000' '\n' < /proc/$(pidof hostapd)/exe | grep -x bss_transition         # the one running now
+```
+
+- installed yes, running no → the running hostapd is the old one: `/etc/init.d/wpad restart; wifi`
+  (or reboot). Roamer ≥ 8.3 does this by itself.
+- installed no → the package on disk has no 802.11v; check `apk list --installed | grep -E 'wpad|hostapd'`.
+
+Either way Roamer ≥ 8.3 brings Wi-Fi up: if hostapd refuses 802.11v, it removes the option (setting it
+to 0 is not enough — the wifi scripts still pass the key on) and keeps 802.11r/k.
 
 The original cause, fixed in 8.1: the router had `wpad-basic-*`, Roamer 8.0 and older didn't swap it
 for the full wpad but enabled 802.11v (`bss_transition`), and basic hostapd refuses that whole AP
@@ -27,9 +37,9 @@ config. On the router:
 apk list --installed | grep -E '^(wpad|hostapd)'          # opkg: opkg list-installed | grep wpad
 for f in 11r acs sae mesh; do hostapd -v$f >/dev/null 2>&1 && echo "hostapd: $f"; done
 
-# 2. get Wi-Fi back right away: switch 802.11v off on every network that has it
-for s in $(uci show wireless | sed -n "s/^wireless\.\([^.]*\)\.bss_transition='1'$/\1/p"); do
-  uci set wireless.$s.bss_transition=0; done
+# 2. get Wi-Fi back right away: remove 802.11v from every network that has it
+for s in $(uci show wireless | sed -n "s/^wireless\.\([^.]*\)\.bss_transition='[^']*'$/\1/p"); do
+  uci delete wireless.$s.bss_transition; done      # delete — "=0" is still passed on
 uci commit wireless; wifi
 
 # 3. install the full wpad, restart it, switch 802.11v back on
