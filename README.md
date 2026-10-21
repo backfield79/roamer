@@ -33,7 +33,7 @@ git clone https://github.com/OWNER/roamer.git && cd roamer
 ```
 
 1. With your computer on the Gateway, choose **Set up a router** and enter the Gateway's IP. Only its
-   Wi-Fi is changed; a pairing code is saved in this folder.
+   Wi-Fi is changed; a pairing code is saved in `roamer-data/`.
 2. Cable a Dumb AP to the Gateway (its WAN or a LAN port) and run `./roaming-setup.sh` again for it.
    The pairing code fills in SSID, password, encryption and mobility domain; the computer waits for
    the Dumb AP on its new address and confirms it.
@@ -66,7 +66,28 @@ you run the script on a router itself.
 - **Dumb AP**: confirmed only when the Gateway answers through its LAN ports *and* you log in on the
   new address (your computer does it for you); otherwise it **rolls back** after 300 s. A Gateway
   cable that started in WAN keeps a temporary way in until then.
-- A recovery card (`…_RECOVERY.txt`) explains every way back, down to failsafe.
+- A recovery card (`recovery/<time>_RECOVERY.txt`) explains every way back, down to failsafe.
+
+## What a run leaves on your computer
+
+Everything goes into `roamer-data/` in the folder you run from (git-ignored, mode 600), one folder
+per router:
+
+```
+roamer-data/
+├── Gateway_main-router/
+│   ├── backups/20261021-090438_192.168.1.1_backup.tar.gz
+│   ├── logs/20261021-090438.ok.log
+│   └── pairing.txt                      ← pairing code (holds the Wi-Fi password)
+├── DumbAP_hall/
+│   ├── backups/…   logs/…
+│   ├── recovery/20261021-091502_RECOVERY.txt
+│   └── lantest/20261021-093010.txt
+└── hosts.txt                            ← known Dumb APs (address, hostname, link-local)
+```
+
+A router's folder is named after its role and hostname *after* the run (a renamed Dumb AP moves
+along). `ROAMER_DATA=/some/path` puts the tree elsewhere.
 
 ## Documentation
 

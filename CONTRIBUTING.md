@@ -7,7 +7,7 @@ router unreachable**.
 
 Open an issue with the template. Most useful: router models + OpenWrt release, the exact wiring,
 the session log from your folder, and for a Dumb AP `./roaming-setup.sh status` / `diag` or the
-`roaming-lantest_…txt`. **Remove Wi-Fi passwords and pairing codes** before posting.
+`lantest/<time>.txt` from `roamer-data/`. **Remove Wi-Fi passwords and pairing codes** before posting.
 
 ## Code rules
 

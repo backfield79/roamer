@@ -36,7 +36,7 @@ reaches the router, and whether the router's own DHCP server is active.
 | Way | Laptop | Command |
 |---|---|---|
 | **Automatic** | any settings | `./roaming-setup.sh`, type its usual address; when it doesn't answer, Roamer finds the router on the cable over IPv6 link-local and asks "Set up this router?" |
-| **IPv6 link-local** | any settings | `ssh root@fe80::…%<interface>` (Linux `eth0`/`enp…`, macOS `en…`, Windows the interface number); the address is in the report and `roaming-hosts.txt` |
+| **IPv6 link-local** | any settings | `ssh root@fe80::…%<interface>` (Linux `eth0`/`enp…`, macOS `en…`, Windows the interface number); the address is in the report and `roamer-data/hosts.txt` |
 | **Recovery address** | fixed `192.168.1.10/24` (as for failsafe) | `ssh root@192.168.1.<n>`; `<n>` = last number of its LAN address (`192.168.254.<n>` if the Gateway itself uses 192.168.1.x) |
 | **Through the Gateway** | address from the Gateway | `ssh -J root@<gateway> root@<dumb-ap>`, or "go through the Gateway" when Roamer can't reach a router |
 

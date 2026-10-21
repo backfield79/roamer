@@ -3,6 +3,21 @@
 All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow `VERSION` in `roaming-setup.sh`.
 
+## [8.2] — 2026-10-21
+
+### Fixed
+- **Wi-Fi still refused after installing the full wpad**: replacing a wpad package doesn't restart
+  the running hostapd, which keeps executing the old (basic) binary and still rejects
+  `bss_transition`. Roamer now spots a hostapd running a replaced binary and restarts `wpad` before
+  applying, double-checks `/usr/sbin/hostapd` is a full build, and if hostapd still refuses 802.11v
+  it retries with 802.11v off and tells you, instead of rolling back.
+- The computer's report shows why a Gateway run failed.
+
+### Added
+- **`roamer-data/`**: every file a run keeps, in one folder per router, `<Role>_<hostname>/` with
+  `backups/`, `logs/`, `recovery/`, `lantest/` and the Gateway's `pairing.txt`; `hosts.txt` at the
+  top. Git-ignored. `ROAMER_DATA` moves it. Files from ≤ 8.1 are still read.
+
 ## [8.1] — 2026-10-21
 
 ### Fixed

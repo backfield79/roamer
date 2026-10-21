@@ -7,7 +7,7 @@ defaults are used, and a router that can't be reached ends the run instead of re
 ROUTER=192.168.1.1 ROLE=gateway BANDS=both CH2=1 CH5=36 SSID='Home' KEY='…' ENC=sae-mixed \
   MD=derive TAILSCALE=no ASSUME_YES=1 ./roaming-setup.sh setup
 
-ROUTER=192.168.1.1 PAIR="$(cat roaming-pair_gateway.txt)" CH2=6 CH5=100 NAME=ap-hall \
+ROUTER=192.168.1.1 PAIR="$(cat roamer-data/Gateway_*/pairing.txt)" CH2=6 CH5=100 NAME=ap-hall \
   AP_ADDR=static AP_IP=192.168.1.2 ASSUME_YES=1 ./roaming-setup.sh setup
 ```
 
@@ -16,6 +16,7 @@ ROUTER=192.168.1.1 PAIR="$(cat roaming-pair_gateway.txt)" CH2=6 CH5=100 NAME=ap-
 | Variable | Values |
 |---|---|
 | `ROUTER` | router address as seen from the computer (IPv4, or `fe80::…%iface`) |
+| `ROAMER_DATA` | where run files go (default `./roamer-data`) |
 | `ACTION` | home-menu choice: `setup lantest report state status diag pair confirm undo help` |
 | `BACKUP` | `yes` / `no` |
 | `ROLE` | `gateway` / `ap` |
@@ -44,6 +45,7 @@ ROUTER=192.168.1.1 PAIR="$(cat roaming-pair_gateway.txt)" CH2=6 CH5=100 NAME=ap-
 | `ASSUME_YES` | `1` = no questions |
 | `GUARD` | `0` = no internet guard on the Gateway |
 | `PING_HOST` | internet check target (default 1.1.1.1) |
+| `WIFI_WAIT` | seconds to wait for Wi-Fi to come up after applying (default 90, 160 with DFS) |
 | `CLEAR`, `NO_COLOR`, `COLS` | screen clearing, colours, width |
 
 ## Sub-commands

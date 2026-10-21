@@ -1,2 +1,7 @@
 #!/bin/sh
+# hostapd's complaint when it lacks 802.11v (MOCK_WIFI_NOWNM=1) or refuses the config (MOCK_WIFI_FAIL=1)
+case "$*" in *hostapd*)
+  [ "${MOCK_WIFI_NOWNM:-}" != 1 ] || echo "daemon.err hostapd: Line 41: unknown configuration item 'bss_transition'"
+  [ "${MOCK_WIFI_FAIL:-}" != 1 ] || echo "daemon.err hostapd: Line 12: invalid channel" ;;
+esac
 exit 0

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Roamer — seamless Wi-Fi roaming for OpenWrt: 802.11r (FT) + 802.11k/v + usteer.        v8.1
+# Roamer — seamless Wi-Fi roaming for OpenWrt: 802.11r (FT) + 802.11k/v + usteer.        v8.2
 # https://github.com/OWNER/roamer · MIT License · POSIX sh / busybox ash
 # Works on any OpenWrt 24.10/25.12 router with a 2.4 and/or 5 GHz radio. Docs: README.md, docs/
 #
@@ -23,7 +23,7 @@
 #   DRY_RUN=1  ASSUME_YES=1  GUARD=0  PING_HOST 1.1.1.1  WIFI_WAIT <s>  CLEAR=0  NO_COLOR=1  COLS <n>
 set -eu
 
-VERSION=8.1
+VERSION=8.2
 NAME_SET=0; [ -n "${NAME+x}" ] && NAME_SET=1
 TS="$(date +%Y%m%d-%H%M%S)"
 DRY_RUN="${DRY_RUN:-0}"; GUARD="${GUARD:-1}"; PING_HOST="${PING_HOST:-1.1.1.1}"
@@ -275,7 +275,27 @@ discover_ll() {   # routers (SSH servers) straight on this computer's cables, fo
     done < "$_tmp/ll.$_if"
   done
 }
-safe_name() { printf '%s' "$1" | sed 's/[:%/]/-/g'; }
+safe_name() { printf '%s' "$1" | sed 's/[^A-Za-z0-9._-]/-/g'; }
+
+# ---------------------------------------------------------------- roamer-data/ (everything a run keeps)
+#   roamer-data/
+#     Gateway_<hostname>/    backups/<time>_<ip>_backup.tar.gz  logs/<time>_ok.log  pairing.txt
+#     DumbAP_<hostname>/     backups/  logs/  recovery/<time>_RECOVERY.txt  lantest/<time>.txt
+#     hosts.txt              known Dumb APs: address hostname link-local
+DATA="${ROAMER_DATA:-./roamer-data}"
+HOSTS="$DATA/hosts.txt"
+rdir() { printf '%s/%s_%s' "$DATA" "$1" "$(safe_name "$2")"; }        # rdir <Role> <hostname>
+mkd()  { (umask 077; mkdir -p "$@"); }
+rel()  { printf '%s' "${1#./}"; }
+hosts_get() { awk -v a="$1" '$1==a{print $'"$2"'; exit}' "$HOSTS" ./roaming-hosts.txt 2>/dev/null || true; }
+newest_pair() { ls -t "$DATA"/Gateway_*/pairing.txt ./roaming-pair_*.txt 2>/dev/null | head -n1 || true; }
+relocate() {   # relocate <from dir> <to dir> — merge a router's folder into its final Role_hostname folder
+  [ "$1" != "$2" ] && [ -d "$1" ] || return 0
+  mkd "$2"
+  ( cd "$1" && find . -type f ) | while IFS= read -r _f; do
+    mkd "$2/$(dirname "$_f")"; mv "$1/$_f" "$2/$_f"; done
+  find "$1" -depth -type d -exec rmdir {} \; 2>/dev/null || true
+}
 
 cant_reach() {   # cant_reach <ip> <ssh error>
   step "Can't reach $1"
@@ -369,7 +389,7 @@ wait_dumb_ap() {   # wait_dumb_ap <new ip> <timeout> <cabling> <old WAN ip|-> <f
 final_report() {   # final_report <ok|err> <role> <report host>
   _res="$1" _role="$2" _rh="$3"; CH=Finish
   step "Report" final
-  _rep=""; [ -z "$_rh" ] || _rep="$(ssh $SSHO -o BatchMode=yes -o ConnectTimeout=5 "root@$_rh" 'sh /tmp/roaming-setup.sh report' 2>/dev/null || true)"
+  _rep="${REP:-}"
   if [ "$_res" = ok ]; then
     case "$_role" in ap) _hd="✓  Dumb AP is set up successfully";; *) _hd="✓  Gateway is set up successfully";; esac
     sayc "${GR}${B}$_hd${N}"
@@ -378,6 +398,7 @@ final_report() {   # final_report <ok|err> <role> <report host>
   else
     sayc "${RE}${B}✗  Not completed${N}"
     [ -z "${APSTATE:-}" ] || sayc "${D}Dumb AP: $APSTATE${N}"
+    [ -z "${GWFAIL:-}" ] || { say ""; wrn "$GWFAIL"; }
   fi
   say ""
   if [ -n "$_rep" ]; then
@@ -389,24 +410,24 @@ EOF
     _hn="$(printf '%s\n' "$_rep" | sed -n 's/^hostname|\([^ ]*\).*/\1/p')"
     _ll="$(printf '%s\n' "$_rep" | sed -n 's/^link-local|\([^ ]*\).*/\1/p')"
     if [ -n "$_ll" ]; then      # remembered: next time Roamer can reach it over the cable by itself
-      { awk -v a="$_rh" '$1!=a' ./roaming-hosts.txt 2>/dev/null || true; echo "$_rh ${_hn:-?} $_ll"; } > ./roaming-hosts.txt.n
-      mv ./roaming-hosts.txt.n ./roaming-hosts.txt; chmod 600 ./roaming-hosts.txt
+      mkd "$DATA"; { awk -v a="$_rh" '$1!=a' "$HOSTS" 2>/dev/null || true; echo "$_rh ${_hn:-?} $_ll"; } > "$HOSTS.n"
+      mv "$HOSTS.n" "$HOSTS"; chmod 600 "$HOSTS"
     fi
   elif [ "$_res" = ok ]; then say "  (could not read the report from $_rh)"; fi
   set --
-  [ ! -f "${base}_backup.tar.gz" ] || set -- "$@" "backup     ${base#./}_backup.tar.gz"
-  [ ! -f "${base}_RECOVERY.txt" ]  || set -- "$@" "recovery   ${base#./}_RECOVERY.txt"
-  [ -z "${PAIRF:-}" ]              || set -- "$@" "pairing    ${PAIRF#./}  (contains the Wi-Fi password)"
+  [ ! -f "$BKF" ]       || set -- "$@" "backup     ${BKF#"$RDIR"/}"
+  [ ! -f "$RCF" ]       || set -- "$@" "recovery   ${RCF#"$RDIR"/}"
+  [ -z "${PAIRF:-}" ]   || set -- "$@" "pairing    ${PAIRF#"$RDIR"/}  (contains the Wi-Fi password)"
   _lf=ok; [ "$_res" != err ] || _lf=err
-  set -- "$@" "log        ${base#./}_$_lf.log"
-  box "Saved in this folder" "$@"
+  set -- "$@" "log        ${LOGB#"$RDIR"/}.$_lf.log"
+  box "Saved in $(rel "$RDIR")/" "$@"
   say ""
   if [ "$_res" = ok ]; then
     case "$_role" in
       ap) say "  Reach it at ${B}$_rh${N} from the Gateway's network. Add more Dumb APs: run ./roaming-setup.sh again."
           say "  Check roaming:  ssh root@$_rh 'ubus call usteer remote_hosts'   (lists the other routers)";;
       *)  say "  Next: wire a Dumb AP (README → Wirings that work) and run ./roaming-setup.sh again —"
-          say "  it picks up the pairing code from this folder by itself.";;
+          say "  it picks up the pairing code from $(rel "$DATA")/ by itself.";;
     esac
   elif [ "$_res" = err ]; then
     if [ "$_role" = ap ] && [ -n "${W_IP:-}" ]; then
@@ -417,7 +438,7 @@ EOF
       else
         say "  Its own log:  ROUTER=<its address> ./roaming-setup.sh status"
       fi
-      say "  Still nothing? Follow ${B}${base#./}_RECOVERY.txt${N}."
+      say "  Still nothing? Follow ${B}$(rel "$RCF")${N}."
     else
       say "  The error is in the log above and in the log file; on failure Roamer reverts its own changes."
     fi
@@ -447,7 +468,7 @@ arp_of() { { ip neigh show "$1" 2>/dev/null; } | grep . || arp -n "$1" 2>/dev/nu
 kv() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -n1; }
 
 lantest() {
-  chapters lantest; CH=Check; LT="./roaming-lantest_$TS.txt"; : > "$LT"; chmod 600 "$LT"
+  chapters lantest; CH=Check; mkd "$DATA/lantest"; LT="$DATA/lantest/${TS}.txt"; : > "$LT"; chmod 600 "$LT"
   lt() { printf '%s\n' "$*" >> "$LT"; }
   step "LAN-port test"
   box "Run it with the cabling that fails" \
@@ -456,9 +477,9 @@ lantest() {
     "2. logs in to the Dumb AP through the Gateway (that path works) to look inside" \
     "3. pings it directly while watching from inside, names the cause" \
     "4. backup first, then the fix — every change reverts by itself unless confirmed" \
-    "Everything is written to ${LT#./}"
+    "Everything is written to $(rel "$DATA")/DumbAP_<hostname>/lantest/"
   say ""
-  _dap="$(awk 'NR==1{print $1}' ./roaming-hosts.txt 2>/dev/null || true)"
+  _dap="$(awk 'NR==1{print $1}' "$HOSTS" ./roaming-hosts.txt 2>/dev/null | head -n1 || true)"
   ask AP_IP "Dumb AP address" "${_dap:-192.168.1.2}" v_ip
   ask GW_IP "Gateway address (this computer's default gateway)" "$(my_gw || true)" v_ip
   # shellcheck disable=SC2153  # GW_IP comes from ask/preset
@@ -486,7 +507,7 @@ lantest() {
     "its ARP entry for $AP: ${_arp:-none}"
   if [ "$d_ping" = ok ] && [ "$d_ssh" = ok ]; then
     CH=Report; step "Report" final; sayc "${GR}${B}✓  The Dumb AP answers directly on this cable${N}"
-    say ""; say "  Saved: ${LT#./}"; return 0
+    say ""; say "  Saved: $(rel "$LT")"; return 0
   fi
   [ -n "$_me" ] || wrn "this computer has no IPv4 address on that cable — DHCP doesn't get through either"
   pause
@@ -499,7 +520,7 @@ lantest() {
   okl "Gateway: logged in"
   say "  Now the ${B}Dumb AP${N} ($AP), through the Gateway:"
   if ! jsh 'cat > /tmp/roaming-setup.sh && chmod +x /tmp/roaming-setup.sh' < "$0" 2>>"$LT"; then
-    bad "can't reach the Dumb AP through the Gateway either — details in ${LT#./}"; return 1; fi
+    bad "can't reach the Dumb AP through the Gateway either — details in $(rel "$LT")"; return 1; fi
   okl "Dumb AP: logged in"
   b="$(jsh "sh /tmp/roaming-setup.sh lanprobe '$_me' '$_mac'" 2>&1 || true)"
   say "  ${D}pinging $AP directly from this computer while watching from inside …${N}"
@@ -513,6 +534,9 @@ lantest() {
     _rb="$(printf '%s\n' "$b" | sed -n "s/^port=$_p .* rx=\([0-9]*\).*/\1/p")"
     _d=$(( ${_ra:-0} - ${_rb:-0} )); _gain="$_gain $_p:+$_d"; [ "$_d" -lt 2 ] || _gport="$_gport $_p"
   done
+  # now the Dumb AP's name is known: its own folder takes the test (and the backup below)
+  _lh="$(kv "$a" host)"; LTD="$(rdir DumbAP "${_lh:-$AP}")"; mkd "$LTD/lantest"
+  mv "$LT" "$LTD/lantest/${TS}.txt"; LT="$LTD/lantest/${TS}.txt"; rmdir "$DATA/lantest" 2>/dev/null || true
   _ng="$(kv "$a" neigh)"; _wanbr="$(kv "$a" wanbr)"; _wcar="$(kv "$a" wancarrier)"
   _wc="$(kv "$a" wanconduit)"; _lc="$(kv "$a" lanconduit)"
   _nmac="$(printf '%s' "$_ng" | sed -n 's/.*lladdr \([0-9a-fA-F:]*\).*/\1/p' | tr 'A-F' 'a-f')"
@@ -559,10 +583,10 @@ lantest() {
   say ""
   BKP=""
   unset _bk; choose _bk "Save a full backup of the Dumb AP into this folder first?" yes \
-    "yes|yes — roaming-lantest_${TS}_backup.tar.gz (restore: sysupgrade -r <file>)" "no|no"
+    "yes|yes — $(rel "$LTD")/backups/${TS}_$(safe_name "$AP")_backup.tar.gz (restore: sysupgrade -r <file>)" "no|no"
   if [ "$_bk" = yes ]; then
-    BKP="./roaming-lantest_${TS}_backup.tar.gz"
-    if jsh 'sysupgrade -b -' > "$BKP" 2>>"$LT" && gzip -t "$BKP" 2>/dev/null; then chmod 600 "$BKP"; okl "backup saved: ${BKP#./}"
+    mkd "$LTD/backups"; BKP="$LTD/backups/${TS}_$(safe_name "$AP")_backup.tar.gz"
+    if jsh 'sysupgrade -b -' > "$BKP" 2>>"$LT" && gzip -t "$BKP" 2>/dev/null; then chmod 600 "$BKP"; okl "backup saved: $(rel "$BKP")"
     else bad "backup failed — stopping before any change"; lt "backup failed"; return 1; fi
   fi
   FIXED=""
@@ -632,9 +656,9 @@ lantest() {
   else sayc "${RE}${B}✗  Still no direct answer${N}"; fi
   say ""
   box "Result" "cause   $VERDICT" "fix     ${FIXED:-none applied / not confirmed}" \
-    "files   ${LT#./}${BKP:+ · ${BKP#./}}"
+    "folder  $(rel "${LTD:-$DATA}")/" "files   ${LT#"${LTD:-$DATA}"/}${BKP:+ · ${BKP#"$LTD"/}}"
   say ""
-  [ -n "$FIXED" ] || say "  Send ${B}${LT#./}${N} — it holds everything measured."
+  [ -n "$FIXED" ] || say "  Send ${B}$(rel "$LT")${N} — it holds everything measured."
   lt "result: ${FIXED:-not fixed}"
   [ -n "$FIXED" ]
 }
@@ -642,7 +666,7 @@ lantest() {
 ws_main() {
   WHO="computer"; chapters computer; CH=Connect
   command -v ssh >/dev/null || die "ssh client not found"
-  _tmp="$(mktemp -d)"; base="./roaming-setup_$TS"
+  _tmp="$(mktemp -d)"; RDIR=""; BKF=""; RCF=""; LOGB=""
   : > "$_tmp/ssh_config"     # stays empty unless you choose "through the Gateway"
   SSHB="-F $_tmp/ssh_config -o UserKnownHostsFile=$_tmp/known_hosts -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR"
   # one multiplexed session PER HOST (%C) — a session to the old address must never answer for the new one
@@ -650,7 +674,7 @@ ws_main() {
   SSHO="$SSHO -o ServerAliveInterval=5 -o ServerAliveCountMax=6"
   PAIRF=""; APSTATE=""; W_IP=""; W_OLD="-"; W_CAB=""
   trap 'for _cm in "$_tmp"/cm-* "$_tmp"/jm-* "$_tmp"/dm-* "$_tmp"/gw.sock; do [ -S "$_cm" ] && ssh -o ControlPath="$_cm" -O exit x >/dev/null 2>&1; done; rm -rf "$_tmp"
-        if [ -n "$LOGTMP" ] && [ -f "$LOGTMP" ]; then mv "$LOGTMP" "${base}_err.log"; echo "log saved: ${base}_err.log" >&2; fi' EXIT
+        if [ -n "$LOGTMP" ] && [ -f "$LOGTMP" ]; then mv "$LOGTMP" "${LOGTMP%.log.part}_err.log"; echo "log saved: ${LOGTMP%.log.part}_err.log" >&2; fi' EXIT
   # shellcheck disable=SC2086
   rsh() { ssh $SSHO "root@$ROUTER" "$@"; }
 
@@ -688,7 +712,7 @@ connect_router() {   # asks for the router (once per session) and opens the SSH 
     if rsh true 2>"$_tmp/err"; then break; fi
     # cabled straight to it? reach it over IPv6 link-local — works with any (or no) IPv4 settings
     _ll=""; case "$ROUTER" in *%*) ;; [Ff][Ee]80:*) _ll="$ROUTER";;
-      *) _ll="$(awk -v a="$ROUTER" '$1==a{print $3; exit}' ./roaming-hosts.txt 2>/dev/null || true)";; esac
+      *) _ll="$(hosts_get "$ROUTER" 3)";; esac
     _z=""
     if [ -n "$_ll" ]; then say "  ${D}trying $_ll over the cable (IPv6 link-local) …${N}"; _z="$(try_ll "$_ll" || true)"; fi
     if [ -z "$_z" ]; then
@@ -732,8 +756,16 @@ connect_router() {   # asks for the router (once per session) and opens the SSH 
   done
   rsh '[ -f /etc/openwrt_release ]' || die "root@$ROUTER is not OpenWrt"
   host="$(rsh 'uci -q get system.@system[0].hostname || echo OpenWrt')"
-  base="./roaming-setup_${host}_$(safe_name "$ROUTER")_$TS"
+  PREROLE="$(rsh 'if [ "$(uci -q get dhcp.lan.ignore)" = 1 ]; then echo DumbAP; elif [ -f /etc/roaming-setup.pair ]; then echo Gateway; else echo Router; fi' 2>/dev/null || echo Router)"
+  set_paths "$(rdir "$PREROLE" "$host")"
   CONNECTED=1
+}
+
+set_paths() {   # set_paths <router dir> — where this run's files go
+  RDIR="$1"
+  BKF="$RDIR/backups/${TS}_$(safe_name "$ROUTER")_backup.tar.gz"
+  RCF="$RDIR/recovery/${TS}_RECOVERY.txt"
+  LOGB="$RDIR/logs/${TS}"
 }
 
 home_menu() {
@@ -764,12 +796,13 @@ help_screen() {
     "status    Dumb AP switch-over log         diag     Dumb AP LAN-side view" \
     "pair      Gateway's pairing code again    confirm  confirm a switch-over by hand" \
     "undo      restore the pre-run snapshot    help     this screen"
-  box "Files written to this folder (mode 600)" \
-    "roaming-setup_<host>_<ip>_<time>_backup.tar.gz   full backup (sysupgrade -r)" \
-    "roaming-setup_<host>_<ip>_<time>_ok.log / _err.log   session log" \
-    "roaming-setup_<host>_<ip>_<time>_RECOVERY.txt     how to get a Dumb AP back" \
-    "roaming-pair_<gateway>.txt   pairing code      roaming-hosts.txt   known Dumb APs" \
-    "roaming-lantest_<time>.txt   LAN-port test"
+  box "Files: $(rel "$DATA")/  (one folder per router, mode 600, git-ignored)" \
+    "Gateway_<host>/backups/<time>_<ip>_backup.tar.gz   full backup (sysupgrade -r)" \
+    "Gateway_<host>/logs/<time>.ok.log | .err.log        session log" \
+    "Gateway_<host>/pairing.txt                          pairing code (Wi-Fi password!)" \
+    "DumbAP_<host>/recovery/<time>_RECOVERY.txt         how to get it back" \
+    "DumbAP_<host>/lantest/<time>.txt                    LAN-port test" \
+    "hosts.txt                                          known Dumb APs (link-local)"
   say "  Every prompt can be preset with a variable (ROUTER, ROLE, SSID, …): see the script header"
   say "  and README.md. Docs: docs/ in the project."
 }
@@ -805,10 +838,10 @@ ws_setup() {
   connect_router
   WHO="computer"; chapters computer; CH=Backup
 
-  LOGTMP="$base.log.part"; : > "$LOGTMP"; chmod 600 "$LOGTMP"
+  mkd "$RDIR/logs"; LOGTMP="$LOGB.log.part"; : > "$LOGTMP"; chmod 600 "$LOGTMP"
   lg "Roamer v$VERSION — $(date) — router $ROUTER ($host)"
 
-  pf="$(ls -t ./roaming-pair_*.txt 2>/dev/null | head -n1 || true)"
+  pf="$(newest_pair)"
   if [ -n "$pf" ] && ! isset PAIR && ! isset ROLE; then
     step "What is $ROUTER ($host)?"
     say "  A pairing code from an earlier Gateway run is in this folder: ${B}$pf${N}"; say ""
@@ -822,12 +855,13 @@ ws_setup() {
   if ! isset BACKUP; then step "Backup"; wrn "$PANTS"; say ""; fi
   CH=Router
   choose BACKUP "Save a full backup of $host into this folder first?" yes \
-    "yes|yes — ${base#./}_backup.tar.gz  (restore: sysupgrade -r <file>; reboot)" "no|no, skip"
+    "yes|yes — $(rel "$BKF")  (restore: sysupgrade -r <file>; reboot)" "no|no, skip"
   if [ "$BACKUP" = yes ]; then
-    rsh 'sysupgrade -b -' > "${base}_backup.tar.gz" || die "backup failed"
-    chmod 600 "${base}_backup.tar.gz"
-    gzip -t "${base}_backup.tar.gz" 2>/dev/null || die "backup file is damaged"
-    out "backup saved: ${base}_backup.tar.gz ($(wc -c < "${base}_backup.tar.gz") bytes)"
+    mkd "$RDIR/backups"
+    rsh 'sysupgrade -b -' > "$BKF" || die "backup failed"
+    chmod 600 "$BKF"
+    gzip -t "$BKF" 2>/dev/null || die "backup file is damaged"
+    out "backup saved: $(rel "$BKF") ($(wc -c < "$BKF") bytes)"
   fi
 
   rsh 'cat > /tmp/roaming-setup.sh && chmod +x /tmp/roaming-setup.sh' < "$0"
@@ -845,14 +879,16 @@ ws_setup() {
   sed "s/${ESC}\[[0-9;]*[A-Za-z]//g; s/\r\$//; $HIDE" "$_tmp/raw" >> "$LOGTMP"
 
   code="$(grep -o 'ROAM1:[A-Za-z0-9+/=]*' "$_tmp/raw" | tail -n1 || true)"
+  GWFAIL="$(sed "s/${ESC}\[[0-9;]*[A-Za-z]//g" "$_tmp/raw" | tr -d '\r' | grep -o 'FAIL: .*' | tail -n1 | sed 's/ — rolling back.*//' || true)"
   role="${ROLE:-}"; gw_ok=0; grep -q "Gateway is set up successfully" "$_tmp/raw" && { gw_ok=1; role=gateway; }
   if grep -q "Gateway is set up successfully" "$_tmp/raw" && [ -n "$code" ]; then
-    PAIRF="./roaming-pair_${host}.txt"; printf '%s\n' "$code" > "$PAIRF"; chmod 600 "$PAIRF"
+    PAIRF="$RDIR/pairing.txt"; printf '%s\n' "$code" > "$PAIRF"; chmod 600 "$PAIRF"
     lg "pairing code saved: $PAIRF"
   fi
   if grep -q -- '----- RECOVERY CARD -----' "$_tmp/raw"; then
-    sed -n '/----- RECOVERY CARD -----/,/----- END -----/p' "$_tmp/raw" | sed "s/${ESC}\[[0-9;]*[A-Za-z]//g; s/\r\$//" > "${base}_RECOVERY.txt"
-    chmod 600 "${base}_RECOVERY.txt"; lg "recovery card saved: ${base}_RECOVERY.txt"
+    mkd "$RDIR/recovery"
+    sed -n '/----- RECOVERY CARD -----/,/----- END -----/p' "$_tmp/raw" | sed "s/${ESC}\[[0-9;]*[A-Za-z]//g; s/\r\$//" > "$RCF"
+    chmod 600 "$RCF"; lg "recovery card saved: $(rel "$RCF")"
   fi
   rhost=""; [ "$rc" = 0 ] && [ $gw_ok = 1 ] && rhost="$ROUTER"
   sw="$(sed "s/${ESC}\[[0-9;]*[A-Za-z]//g" "$_tmp/raw" | tr -d '\r' | grep -o 'ROAMER-SWITCH .*' | tail -n1 || true)"
@@ -861,14 +897,24 @@ ws_setup() {
     set -- $sw; role=ap
     if wait_dumb_ap "$2" "$3" "${4:-lan}" "${5:--}" "${6:-}"; then rhost="$2"; else rc=1; rhost=""; fi
   fi
-  if [ "$DRY_RUN" = 1 ]; then st=err; [ "$rc" = 0 ] && st=ok; mv "$LOGTMP" "${base}_$st.log"; LOGTMP=""; echo "log saved: ${base}_$st.log"; return "$rc"; fi
+  if [ "$DRY_RUN" = 1 ]; then st=err; [ "$rc" = 0 ] && st=ok; mv "$LOGTMP" "$LOGB.dryrun_$st.log"; LOGTMP=""; echo "log saved: $(rel "$LOGB").dryrun_$st.log"; return "$rc"; fi
   st=err; [ "$rc" = 0 ] && st=ok
   res="$st"; [ "$st" = ok ] && [ -z "$rhost" ] && res=none     # finished without changing anything
+  # what is set up now — and the router's final folder: Role_<hostname as it is now>
+  REP=""; [ -z "$rhost" ] || REP="$(ssh $SSHO -o BatchMode=yes -o ConnectTimeout=5 "root@$rhost" 'sh /tmp/roaming-setup.sh report' 2>/dev/null || true)"
+  _fh="$(printf '%s\n' "$REP" | sed -n 's/^hostname|\([^ ]*\).*/\1/p')"
+  _fr="$PREROLE"; [ "$res" != ok ] || { [ "$role" = ap ] && _fr=DumbAP || _fr=Gateway; }
+  _nd="$(rdir "$_fr" "${_fh:-$host}")"
+  if [ "$_nd" != "$RDIR" ]; then
+    _old="$RDIR"; relocate "$_old" "$_nd"
+    LOGTMP="$_nd${LOGTMP#"$_old"}"; [ -z "$PAIRF" ] || PAIRF="$_nd${PAIRF#"$_old"}"
+    _b="$BKF"; _r="$RCF"; set_paths "$_nd"; BKF="$_nd${_b#"$_old"}"; RCF="$_nd${_r#"$_old"}"
+  fi
   final_report "$res" "$role" "$rhost"
   if [ "$st" = ok ] && [ "$role" = gateway ] && [ -n "$PAIRF" ]; then
     say ""; say "  Pairing code (also in ${PAIRF#./}):"; say "$code"
   fi
-  mv "$LOGTMP" "${base}_$st.log"; LOGTMP=""
+  mv "$LOGTMP" "$LOGB.${st}.log"; LOGTMP=""
   return "$rc"
 }
 
@@ -964,6 +1010,7 @@ diag() {   # what a cable on this router sees — run it while the laptop is plu
 
 lanprobe() {   # lanprobe <computer ip> <computer mac> — machine-readable view of one LAN client
   _ip="$1"; _mac="$(echo "$2" | tr 'A-F' 'a-f')"
+  echo "host=$(uci -q get system.@system[0].hostname || echo OpenWrt)"
   echo "brmac=$(cat /sys/class/net/br-lan/address 2>/dev/null)"
   echo "braddr=$(ip -4 -o addr show dev br-lan 2>/dev/null | awk '{print $4}' | tr '\n' ' ')"
   echo "brrx=$(cat /sys/class/net/br-lan/statistics/rx_packets 2>/dev/null)"
@@ -1403,6 +1450,8 @@ fi
 # full hostapd present (exact package)? Only then 802.11v (bss_transition): a basic build is compiled
 # without it and refuses the whole AP config — no Wi-Fi at all.
 WNM=0; for p in $FULLW; do pkg_has "$p" && { WNM=1; break; }; done
+if [ "$WNM" = 1 ] && [ -x /usr/sbin/hostapd ] && ! /usr/sbin/hostapd -vmesh >/dev/null 2>&1; then
+  WNM=0; wrn "a full wpad package is listed, but /usr/sbin/hostapd is not a full build"; fi
 [ "$DRY_RUN" != 1 ] || [ -z "$R_NEED" ] || WNM=1          # dry run: the plan assumes the install happens
 [ "$WNM" = 1 ] || wrn "no full hostapd — 802.11v (BSS transition) stays off; 802.11r/k still work"
 
@@ -1947,6 +1996,20 @@ wifi_up() {   # every roaming Wi-Fi network is actually broadcasting (hostapd ac
 }
 WIFI_MAX="${WIFI_WAIT:-90}"; isset WIFI_WAIT || case " $(autolist 5g 2>/dev/null) $(printf '%s' "$PLAN" | cut -d'|' -f6 | tr '\n' ' ') " in *" 1"[0-4][0-9]" "*|*" 5"[2-9]" "*|*" 6"[0-4]" "*) WIFI_MAX=160;; esac   # DFS: 60 s radar check
 wifi_wait() { _d=$(( $(date +%s) + WIFI_MAX )); while [ "$(date +%s)" -lt "$_d" ]; do wifi_up && return 0; sleep 3; done; return 1; }
+wpad_stale() {   # hostapd still running a binary that a package update replaced (it runs the deleted file)
+  for _p in $(pidof hostapd wpa_supplicant 2>/dev/null); do
+    readlink "/proc/$_p/exe" 2>/dev/null | grep -q '(deleted)' && return 0; done; return 1
+}
+wpad_fresh() {   # make sure the hostapd that will read our config is the installed one
+  wpad_stale || return 0
+  log "hostapd still runs the binary replaced by a package update — restarting wpad"
+  /etc/init.d/wpad restart >/dev/null 2>&1 || true; sleep 3
+}
+drop_wnm() {     # last resort: this hostapd can't do 802.11v — switch it off on our networks
+  printf '%s\n' "$PLAN" | while IFS='|' read -r _r _b _if _n _u _c _h _t; do
+    if [ -n "$_if" ]; then uci set "wireless.$_if.bss_transition=0"; fi; done
+  uci commit wireless; wifi >/dev/null 2>&1 || true
+}
 wifi_why() { logread -e hostapd 2>/dev/null | grep -iE 'unknown|invalid|fail|error|could not' | tail -n 3 | sed 's/^.*hostapd[^:]*: *//' | tr '\n' ' '; }
 LOGIN_RE='[Aa]uth succeeded|accepted login'
 logins() { logread -e "$LOGIN_RE" 2>/dev/null | wc -l; }
@@ -1963,6 +2026,7 @@ lanpath() {   # does the Gateway answer through br-lan (the LAN ports), not thro
 if [ "$ROLE" = ap ]; then
   [ "$TS_FIX" != 1 ] || { tailscale set --accept-routes=false 2>/dev/null && lg "tailscale: accept-routes off"; } || true
   for s in dnsmasq odhcpd firewall; do /etc/init.d/$s disable 2>/dev/null || true; done
+  wpad_fresh
   rm -f "$CONFIRMFILE"
   if [ -f "$JOBPID" ] && kill -0 "$(cat "$JOBPID" 2>/dev/null)" 2>/dev/null; then
     kill "$(cat "$JOBPID")" 2>/dev/null || true; lg "stopped an earlier Roamer background job"; fi
@@ -2056,7 +2120,10 @@ if [ "$ROLE" = ap ]; then
     alog "self-check OK: br-lan $(ip -4 -o addr show br-lan | awk '{print $4}' | tr '\n' ' ')· ports $(ls "$SYSNET/br-lan/brif" | tr '\n' ' ')"
     [ "$TMPWAN" = 0 ] || alog "temporary way in: WAN $(ip -4 -o addr show "$wdev" 2>/dev/null | awk '{print $4}' | head -n1)"
     st "applying|||starting Wi-Fi (DFS channels need ~60 s)"
-    if wifi_wait; then alog "Wi-Fi is up on: $SEL"; else rollback "Wi-Fi did not start — hostapd: $(wifi_why)"; fi
+    if wifi_wait; then alog "Wi-Fi is up on: $SEL"
+    elif wifi_why | grep -q bss_transition && { alog "this hostapd refuses 802.11v — retrying without it"; drop_wnm; wifi_wait; }; then
+      alog "Wi-Fi is up on: $SEL (802.11v off: install the full wpad, reboot, run again)"
+    else rollback "Wi-Fi did not start — hostapd: $(wifi_why)"; fi
     DL=$(( $(date +%s) + CONFIRM_TIMEOUT ))
     n0="$(logins)"; t=0; ok=0; last=""; how=""; msg=""
     while :; do
@@ -2094,11 +2161,18 @@ trap '' HUP
 step "Applying"
 was_ok=0; if health; then was_ok=1; fi
 log "applying (internet before: $([ $was_ok = 1 ] && echo up || echo DOWN))"
-ubus call network reload
+wpad_fresh
+ubus call network reload; sleep 2; wifi >/dev/null 2>&1 || true
 sleep 3; /etc/init.d/usteer restart
-ok=1; WHY=""
+ok=1; WHY=""; WNMOFF=0
 say "  ${D}waiting for Wi-Fi to come up (up to ${WIFI_MAX}s) …${N}"
-if ! wifi_wait; then ok=0; WHY="Wi-Fi did not start — hostapd: $(wifi_why)"; fi
+if ! wifi_wait; then
+  if wifi_why | grep -q bss_transition; then
+    log "this hostapd refuses 802.11v (bss_transition) — retrying without it"
+    drop_wnm; WNMOFF=1
+    wifi_wait || { ok=0; WHY="Wi-Fi did not start — hostapd: $(wifi_why)"; }
+  else ok=0; WHY="Wi-Fi did not start — hostapd: $(wifi_why)"; fi
+fi
 if [ $ok = 1 ] && [ "$GUARD" = 1 ] && [ "$was_ok" = 1 ]; then
   t=0; while [ $t -lt 45 ]; do health && break; sleep 3; t=$((t+3)); done
   health || { ok=0; WHY="internet lost after apply"; }
@@ -2132,6 +2206,7 @@ step "Done" final
 out ""
 out "$(ctr "${GR}${B}✓  Gateway is set up successfully${N}")"
 out ""
+[ "$WNMOFF" = 0 ] || out "  ${YE}⚠${N} 802.11v is off: this router's hostapd can't do it. Install the full wpad, reboot, run again."
 [ -z "$CHK" ] || out "  $CHK"
 out "  SSID '$SSID' ($([ "$HIDDEN" = 1 ] && echo hidden || echo visible)) · $ENC · MD $MD · steer < $ROAM_DBM dBm ·$chs"
 out ""

@@ -1,4 +1,6 @@
-# Files Roamer writes into the folder it runs from — they contain configs, logs and Wi-Fi passwords
+# Everything Roamer keeps from a run (backups, logs, pairing codes = Wi-Fi passwords)
+roamer-data/
+# … and the flat file names of Roamer ≤ 8.1
 roaming-setup_*
 roaming-pair_*.txt
 roaming-hosts.txt

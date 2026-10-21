@@ -31,12 +31,14 @@ has gw "Mobility domain" "mobility-domain screen"
 has gw "Don't" "mobility-domain do's and don'ts"
 has gw "Gateway is set up successfully" "Gateway set up"
 has gw "What is set up on 192.168.2.1" "report screen"
-exists "$MOCK_STATE/ws/roaming-pair_gateway.txt" "pairing code saved"
-exists "$MOCK_STATE/ws/roaming-setup_gateway_192.168.2.1_*_backup.tar.gz" "backup saved"
-exists "$MOCK_STATE/ws/roaming-setup_gateway_192.168.2.1_*_ok.log" "log saved as _ok"
+exists "$MOCK_STATE/ws/roamer-data/Gateway_gateway/pairing.txt" "pairing code saved in roamer-data/Gateway_<host>/"
+exists "$MOCK_STATE/ws/roamer-data/Gateway_gateway/backups/*_192.168.2.1_backup.tar.gz" "backup in backups/"
+exists "$MOCK_STATE/ws/roamer-data/Gateway_gateway/logs/*.ok.log" "log in logs/ as .ok.log"
+if ls -d "$MOCK_STATE/ws/roamer-data"/Router_* >/dev/null 2>&1; then nok "pre-run folder merged into Gateway_<host>"; else ok "pre-run folder merged into Gateway_<host>"; fi
+if grep -q "ROAM1:[A-Za-z0-9]" "$MOCK_STATE/ws/roamer-data"/Gateway_gateway/logs/*.ok.log; then nok "pairing code hidden in the log"; else ok "pairing code hidden in the log"; fi
 if [ -e /tmp/roaming-env ]; then nok "presets file removed after use"; else ok "presets file removed after use"; fi
 uci_is wireless.default_radio1.ieee80211r 1 "802.11r on"
-cp "$MOCK_STATE/ws/roaming-pair_gateway.txt" /tmp/pair.keep 2>/dev/null || true
+cp "$MOCK_STATE/ws/roamer-data/Gateway_gateway/pairing.txt" /tmp/pair.keep 2>/dev/null || true
 PAIRCODE="$(cat /tmp/pair.keep 2>/dev/null || true)"
 
 echo "== Dumb AP, Gateway cable in WAN (temporary WAN path, cable move)"
@@ -50,6 +52,8 @@ run apwan '\n\n\n\n\ny\n' "" RS_MODE=ws ROUTER=192.168.2.10 PAIR="$PAIRCODE" WAN
 has apwan "until you do, this router stays reachable at its current WAN address 192.168.2.10" "wiring check: Gateway on WAN"
 has apwan "WAN keeps its lease (192.168.2.10)" "plan: temporary WAN path"
 has apwan "Dumb AP is set up successfully" "Dumb AP confirmed and set up"
+exists "$MOCK_STATE/ws/roamer-data/DumbAP_ap1/recovery/*_RECOVERY.txt" "recovery card in DumbAP_<host>/recovery/"
+file_has "$MOCK_STATE/ws/roamer-data/hosts.txt" "192.168.2.2 ap1 fe80::" "Dumb AP remembered in hosts.txt"
 file_has /tmp/roaming-apply.log "the Gateway answers through the LAN ports" "confirmed only via the LAN path"
 file_has /tmp/roaming-apply.log "temporary WAN path removed" "temporary WAN path removed after confirmation"
 uci_is network.wan '<unset>' "wan interface gone"
@@ -76,7 +80,8 @@ has lt "Found it" "names the cause"
 has lt "backup saved" "backup before the change"
 has lt "The Dumb AP answers on this cable now" "fixed and confirmed"
 uci_is network.cfg030f15.ports "lan1 lan2 lan3 lan4" "WAN taken out of br-lan"
-exists "$MOCK_STATE/ws/roaming-lantest_*_backup.tar.gz" "lantest backup file"
+exists "$MOCK_STATE/ws/roamer-data/DumbAP_obsidian/backups/*_backup.tar.gz" "lantest backup in DumbAP_<host>/backups/"
+exists "$MOCK_STATE/ws/roamer-data/DumbAP_obsidian/lantest/*.txt" "lantest report in DumbAP_<host>/lantest/"
 
 echo "== the router's own current address is not 'in use'"
 fixture lanip=192.168.2.10
@@ -113,6 +118,16 @@ run wifail '\n\n\n\n\ny\n' "" RS_MODE=ws ROUTER=192.168.2.1 ROLE=gateway BANDS=b
 has wifail "Wi-Fi did not start" "Wi-Fi failure detected"
 has wifail "ROLLED BACK: Wi-Fi settings restored" "Wi-Fi rolled back"
 hasnt wifail "Gateway is set up successfully" "no false success"
+
+echo "== hostapd refuses 802.11v (stale/basic build) → retried without it, not rolled back"
+fixture lanip=192.168.2.1 hostname=gw4
+# shellcheck disable=SC2086
+run nownm '\n\n\n\n\ny\n' "" RS_MODE=ws ROUTER=192.168.2.1 ROLE=gateway BANDS=both COUNTRY=NL $WIFI \
+  SSID=MyHome KEY=homepass1 ENC=sae-mixed HIDDEN=0 ROAM_DBM=-70 MOCK_BRIP=192.168.2.1/24 MOCK_WIFI_NOWNM=1 WIFI_WAIT=6
+has nownm "retrying without it" "bss_transition refusal recognised"
+has nownm "Gateway is set up successfully" "set up anyway"
+has nownm "802.11v is off" "user told 802.11v is off and why"
+uci_is wireless.default_radio1.bss_transition 0 "bss_transition switched off"
 
 echo
 echo "passed: $PASS   failed: $FAIL"

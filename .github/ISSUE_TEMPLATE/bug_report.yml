@@ -48,7 +48,7 @@ body:
     attributes:
       label: Logs
       description: |
-        Attach the `roaming-setup_…_err.log` / `_ok.log` from your folder. For a Dumb AP also
+        Attach the log from `roamer-data/<Role>_<router>/logs/`. For a Dumb AP also
         `./roaming-setup.sh status` and `./roaming-setup.sh diag`; if a cabled computer can't
-        reach it, the `roaming-lantest_…txt` from `./roaming-setup.sh lantest`.
+        reach it, the `lantest/<time>.txt` from `./roaming-setup.sh lantest`.
       render: text

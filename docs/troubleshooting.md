@@ -13,7 +13,12 @@ That LuCI text is only a link next to "Mode" whenever the installed wpad has no 
 is not the problem; don't install `wpad-mesh-*` (it conflicts with the others and also lacks
 802.11v).
 
-The usual cause, fixed in 8.1: the router had `wpad-basic-*`, Roamer 8.0 and older didn't swap it
+**Installed the full wpad and it still fails?** Replacing the package doesn't restart the running
+hostapd: it keeps executing the old basic binary (`ls -l /proc/$(pidof hostapd)/exe` shows
+`(deleted)`). Run `/etc/init.d/wpad restart; wifi` or reboot. Roamer 8.2 does this by itself, and if
+hostapd still refuses 802.11v it turns 802.11v off instead of failing.
+
+The original cause, fixed in 8.1: the router had `wpad-basic-*`, Roamer 8.0 and older didn't swap it
 for the full wpad but enabled 802.11v (`bss_transition`), and basic hostapd refuses that whole AP
 config. On the router:
 
@@ -63,7 +68,7 @@ Dumb AP's own processor is broken. From that laptop, with that cabling:
    - otherwise: clear its tables → restart its network → reboot (checked by uptime), re-testing
      after each; "works" needs two ping rounds plus SSH.
 
-Everything goes into `roaming-lantest_<time>.txt`. Attach it to an issue if nothing helped.
+Everything goes into `roamer-data/DumbAP_<host>/lantest/<time>.txt`. Attach it to an issue if nothing helped.
 
 A laptop with **two network cards in the same network** (e.g. one cabled to the Dumb AP, one to the
 Gateway) answers ARP for its address on both, and replies can go to the wrong card. Unplug one or

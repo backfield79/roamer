@@ -6,6 +6,7 @@ case "$*" in
 import json, os
 d = json.load(open(os.environ['MOCK_STATE'] + '/live.json'))
 fail = os.environ.get('MOCK_WIFI_FAIL') == '1'
+nownm = os.environ.get('MOCK_WIFI_NOWNM') == '1'   # hostapd without 802.11v: refuses bss_transition=1
 out = {}
 for s in d['order']:
     if d['t'][s] == 'wifi-device':
@@ -15,7 +16,7 @@ for s in d['order']:
         r = d['o'][s].get('device'); n = s.split('.')[1]
         if r in out:
             i = {'section': n}
-            if not fail: i['ifname'] = 'phy%s-%s' % (r[-1], n)
+            if not fail and not (nownm and d['o'][s].get('bss_transition') == '1'): i['ifname'] = 'phy%s-%s' % (r[-1], n)
             out[r]['interfaces'].append(i)
 print(json.dumps(out))
 PY

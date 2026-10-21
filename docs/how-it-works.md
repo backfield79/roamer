@@ -9,7 +9,7 @@
 | Rollback | if internet is lost after applying | unless confirmed within 300 s |
 
 Set up the Gateway first. It prints a **pairing code** (`ROAM1:…`, saved as
-`roaming-pair_<gateway>.txt`), which carries SSID, password, encryption, mobility domain, country,
+`roamer-data/Gateway_<host>/pairing.txt`), which carries SSID, password, encryption, mobility domain, country,
 roaming threshold, the Gateway's address, its channels and its DHCP pool to every Dumb AP run.
 It contains the Wi-Fi password, so keep it private.
 
@@ -81,14 +81,19 @@ download.
 
 ## Files
 
-| File (in the folder you run from, mode 600) | What |
+All in `roamer-data/` (git-ignored, mode 600), one folder per router named `<Role>_<hostname>`:
+
+| File | What |
 |---|---|
-| `roaming-setup_<host>_<ip>_<time>_backup.tar.gz` | full backup: `sysupgrade -r <file>; reboot` |
-| `roaming-setup_<host>_<ip>_<time>_ok.log` / `_err.log` | session log |
-| `roaming-setup_<host>_<ip>_<time>_RECOVERY.txt` | how to get a Dumb AP back |
-| `roaming-pair_<gateway>.txt` | pairing code (contains the Wi-Fi password) |
-| `roaming-hosts.txt` | each Dumb AP's address, hostname and IPv6 link-local |
-| `roaming-lantest_<time>.txt` | LAN-port test results |
+| `<Role>_<host>/backups/<time>_<ip>_backup.tar.gz` | full backup: `sysupgrade -r <file>; reboot` |
+| `<Role>_<host>/logs/<time>.ok.log` / `.err.log` | session log (pairing codes hidden) |
+| `DumbAP_<host>/recovery/<time>_RECOVERY.txt` | how to get a Dumb AP back |
+| `Gateway_<host>/pairing.txt` | pairing code (contains the Wi-Fi password) |
+| `DumbAP_<host>/lantest/<time>.txt` | LAN-port test results |
+| `hosts.txt` | each Dumb AP's address, hostname and IPv6 link-local |
+
+Pairing codes and `hosts.txt` from Roamer ≤ 8.1 (`roaming-pair_*.txt`, `roaming-hosts.txt` in the
+current folder) are still read.
 
 On the router: `/etc/roaming-setup.bak/<time>/` (snapshot, `restore.sh`, `RECOVERY.txt`) and
 `/etc/roaming-setup.bak/restore-latest.sh`. The Wi-Fi password travels to the router in a temporary
