@@ -1,6 +1,6 @@
 # Roamer
 
-[![CI](https://github.com/OWNER/roamer/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/roamer/actions/workflows/ci.yml)
+[![CI](https://github.com/backfield79/roamer/actions/workflows/ci.yml/badge.svg)](https://github.com/backfield79/roamer/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![OpenWrt 24.10 | 25.12](https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.12-00B5E2)
 
@@ -28,7 +28,7 @@ assumed.
 ## Quick start
 
 ```sh
-git clone https://github.com/OWNER/roamer.git && cd roamer
+git clone https://github.com/backfield79/roamer.git && cd roamer
 ./roaming-setup.sh
 ```
 
