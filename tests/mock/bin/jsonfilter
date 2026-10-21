@@ -12,12 +12,13 @@ try:
   elif e=='@["ipv4-address"][0].address': r=d['ipv4-address'][0]['address']
   elif e=='@["ipv4-address"][0].mask': r=str(d['ipv4-address'][0]['mask'])
   elif e=='@.route[@.target="0.0.0.0"].nexthop': r=[x['nexthop'] for x in d['route'] if x['target']=='0.0.0.0'][0]
+  elif e=='@.ssid': r=d['ssid']
   elif e=='@.l3_device': r=d['l3_device']
   elif e=='@.network.lan.ports[0]': r=d['network']['lan']['ports'][0]
   elif re.match(r'^@\.(\w+)\.up$', e): r=str(d[re.match(r'^@\.(\w+)\.up$', e).group(1)]['up']).lower()
-  elif re.match(r"^@\.(\w+)\.interfaces\[@\.section='(\w+)'\]\.ifname$", e):
-    m=re.match(r"^@\.(\w+)\.interfaces\[@\.section='(\w+)'\]\.ifname$", e)
-    r=[i['ifname'] for i in d[m.group(1)]['interfaces'] if i.get('section')==m.group(2) and 'ifname' in i][0]
+  elif re.match(r"^@\.(\w+)\.interfaces\[@\.section=(['\"])(\w+)\2\]\.ifname$", e):
+    m=re.match(r"^@\.(\w+)\.interfaces\[@\.section=(['\"])(\w+)\2\]\.ifname$", e)
+    r=[i['ifname'] for i in d[m.group(1)]['interfaces'] if i.get('section')==m.group(3) and 'ifname' in i][0]
   else:
     m=re.match(r'@\.(\w+)\.interfaces\[\*\]\.ifname',e); r='\n'.join(i['ifname'] for i in d[m.group(1)]['interfaces'] if 'ifname' in i)
     if not r: sys.exit(1)

@@ -20,6 +20,11 @@ fixture() {   # fixture [mkdb options…] — a fresh fake OpenWrt router
   for f in wireless system dhcp firewall network; do echo "# test" > "/etc/config/$f"; done
   echo "Test Router" > /tmp/sysinfo/model
   cp "$T/mock/bin/ipcalc.sh" /bin/ipcalc.sh
+  # a stand-in wpad binary whose config parser "knows" 802.11v (WPADBIN=1); removed otherwise
+  if grep -q roamer-test /usr/sbin/wpad 2>/dev/null; then rm -f /usr/sbin/wpad /usr/sbin/hostapd; fi
+  if [ "${WPADBIN:-0}" = 1 ]; then
+    mkdir -p /usr/sbin; printf 'roamer-test\000bss_transition\000' > /usr/sbin/wpad; ln -sf wpad /usr/sbin/hostapd; fi
+  printf '#!/bin/sh\n[ "$1" = restart ] && touch "%s/wpad_restarted"\nexit 0\n' "$MOCK_STATE" > /etc/init.d/wpad; chmod +x /etc/init.d/wpad
   printf '%s\nusteer\nucode\nluci-base\nluci-app-usteer\n' "${WPAD:-wpad-mbedtls}" > "$MOCK_STATE/apk.installed"
   python3 "$T/mock/mkdb.py" "$MOCK_STATE/live.json" "$@"
 }

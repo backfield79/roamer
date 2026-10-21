@@ -18,15 +18,21 @@ literal `bss_transition` in its config parser:
 
 ```sh
 tr '\000' '\n' < /usr/sbin/hostapd | grep -x bss_transition                 # installed hostapd
-tr '\000' '\n' < /proc/$(pidof hostapd)/exe | grep -x bss_transition         # the one running now
+# the ones running now (pidof misses the jailed hostapd — look at /proc instead):
+for d in /proc/[0-9]*; do case "$(readlink $d/exe)" in */wpad*|*/hostapd*)
+  echo "pid ${d#/proc/}: $(readlink $d/exe) 802.11v=$(tr '\000' '\n' < $d/exe | grep -cx bss_transition)";; esac; done
 ```
 
+All networks of a radio share one hostapd config: if hostapd can't do 802.11v, a `bss_transition`
+left on *any* network of that radio keeps the whole radio down.
+
 - installed yes, running no → the running hostapd is the old one: `/etc/init.d/wpad restart; wifi`
-  (or reboot). Roamer ≥ 8.3 does this by itself.
+  (or reboot). Roamer ≥ 8.4 does this by itself.
 - installed no → the package on disk has no 802.11v; check `apk list --installed | grep -E 'wpad|hostapd'`.
 
-Either way Roamer ≥ 8.3 brings Wi-Fi up: if hostapd refuses 802.11v, it removes the option (setting it
-to 0 is not enough — the wifi scripts still pass the key on) and keeps 802.11r/k.
+Either way Roamer ≥ 8.4 brings Wi-Fi up: if hostapd refuses 802.11v it first restarts `wpad` (when the
+installed hostapd can do it), else removes the option from every network on that radio (setting it to 0
+is not enough — the wifi scripts still pass the key on) and keeps 802.11r/k.
 
 The original cause, fixed in 8.1: the router had `wpad-basic-*`, Roamer 8.0 and older didn't swap it
 for the full wpad but enabled 802.11v (`bss_transition`), and basic hostapd refuses that whole AP
@@ -58,6 +64,20 @@ Still nothing? `logread -e hostapd | tail -30` names the refused option, and `./
 shows radios, interfaces and hostapd features. Roamer 8.1 checks after applying that every roaming
 network really broadcasts, and rolls the Wi-Fi back if it doesn't. If LuCI keeps showing old hints
 after a package change, log out and in again; it caches the hostapd feature list per session.
+
+## "Wi-Fi did not start" but hostapd logged no error
+
+Roamer ≥ 8.5 checks each roaming network through hostapd's own status, then `iw`, then `iwinfo`, and
+the failure line lists what each said. To look yourself:
+
+```sh
+ubus list 'hostapd.*'                                   # one object per running Wi-Fi network
+ubus call hostapd.phy0-ap0 get_status | grep -E '"(status|ssid)"'   # status ENABLED = broadcasting
+iw dev                                                  # type AP + ssid per interface
+```
+
+If those show the network as running and Roamer still says it isn't, open an issue with the log
+(`roamer-data/<Role>_<host>/logs/`). `WIFI_WAIT=<s>` lengthens the wait for slow radios.
 
 ## Laptop on a Dumb AP's LAN port: internet works, the Dumb AP doesn't answer
 

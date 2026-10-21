@@ -117,18 +117,50 @@ run wifail '\n\n\n\n\ny\n' "" RS_MODE=ws ROUTER=192.168.2.1 ROLE=gateway BANDS=b
   SSID=MyHome KEY=homepass1 ENC=sae-mixed HIDDEN=0 ROAM_DBM=-70 MOCK_BRIP=192.168.2.1/24 MOCK_WIFI_FAIL=1 WIFI_WAIT=6
 has wifail "Wi-Fi did not start" "Wi-Fi failure detected"
 has wifail "ROLLED BACK: Wi-Fi settings restored" "Wi-Fi rolled back"
+has wifail "the check saw: radio" "the reason names what the Wi-Fi check saw"
 hasnt wifail "Gateway is set up successfully" "no false success"
 
-echo "== hostapd refuses 802.11v (stale/basic build) → retried without it, not rolled back"
-fixture lanip=192.168.2.1 hostname=gw4
+echo "== running hostapd is old (installed one can do 802.11v) → wpad restarted, 802.11v kept"
+WPADBIN=1 fixture lanip=192.168.2.1 hostname=gw5
+# shellcheck disable=SC2086
+run stale '\n\n\n\n\ny\n' "" RS_MODE=ws ROUTER=192.168.2.1 ROLE=gateway BANDS=both COUNTRY=NL $WIFI \
+  SSID=MyHome KEY=homepass1 ENC=sae-mixed HIDDEN=0 ROAM_DBM=-70 MOCK_BRIP=192.168.2.1/24 \
+  MOCK_WIFI_NOWNM=1 MOCK_NOWNM_UNTIL_RESTART=1 WIFI_WAIT=6
+has stale "restarting wpad so that one runs" "old running hostapd restarted"
+has stale "Wi-Fi up with 802.11v after restarting wpad" "802.11v kept"
+has stale "Gateway is set up successfully" "set up"
+hasnt stale "802.11v is off" "no needless 802.11v removal"
+uci_is wireless.default_radio1.bss_transition 1 "bss_transition still on"
+rm -f /usr/sbin/wpad /usr/sbin/hostapd
+
+echo "== hostapd refuses 802.11v (no 802.11v anywhere) → removed from the whole radio, not rolled back"
+fixture lanip=192.168.2.1 hostname=gw4 extra=1
 # shellcheck disable=SC2086
 run nownm '\n\n\n\n\ny\n' "" RS_MODE=ws ROUTER=192.168.2.1 ROLE=gateway BANDS=both COUNTRY=NL $WIFI \
   SSID=MyHome KEY=homepass1 ENC=sae-mixed HIDDEN=0 ROAM_DBM=-70 MOCK_BRIP=192.168.2.1/24 MOCK_WIFI_NOWNM=1 WIFI_WAIT=6
-has nownm "retrying without it" "bss_transition refusal recognised"
+has nownm "retrying without 802.11v" "bss_transition refusal recognised"
 has nownm "Gateway is set up successfully" "set up anyway"
 has nownm "802.11v is off" "user told 802.11v is off and why"
 uci_is wireless.default_radio1.bss_transition '<unset>' "bss_transition removed (=0 is still refused by such a hostapd)"
 has nownm "unknown configuration item 'bss_transition'" "hostapd's own reason shown"
+uci_is wireless.wifinet2.bss_transition '<unset>' "also removed from the other network on that radio"
+has nownm "802.11v removed from: default_radio0 wifinet2" "user told which networks changed"
+
+echo "== OpenWrt 25.12-style box without the iwinfo CLI → hostapd's own ubus status confirms Wi-Fi"
+fixture lanip=192.168.2.1 hostname=gw6
+# shellcheck disable=SC2086
+run noiw '\n\n\n\n\ny\n' "" RS_MODE=ws ROUTER=192.168.2.1 ROLE=gateway BANDS=both COUNTRY=NL $WIFI \
+  SSID=MyHome KEY=homepass1 ENC=sae-mixed HIDDEN=0 ROAM_DBM=-70 MOCK_BRIP=192.168.2.1/24 MOCK_NO_IWINFO=1 WIFI_WAIT=6
+has noiw "Gateway is set up successfully" "set up without iwinfo"
+hasnt noiw "Wi-Fi did not start" "no false Wi-Fi failure"
+has noiw "ROAMER v$(sed -n 's/^VERSION=//p' "$ROOT/roaming-setup.sh")" "version in the screen header"
+
+echo "== netifd status without section names → hostapd BSSes with our SSID count"
+fixture lanip=192.168.2.1 hostname=gw7
+# shellcheck disable=SC2086
+run nosec '\n\n\n\n\ny\n' "" RS_MODE=ws ROUTER=192.168.2.1 ROLE=gateway BANDS=both COUNTRY=NL $WIFI \
+  SSID=MyHome KEY=homepass1 ENC=sae-mixed HIDDEN=0 ROAM_DBM=-70 MOCK_BRIP=192.168.2.1/24 MOCK_NO_IWINFO=1 MOCK_NOSECTION=1 WIFI_WAIT=6
+has nosec "Gateway is set up successfully" "set up via hostapd's SSID list"
 
 echo
 echo "passed: $PASS   failed: $FAIL"

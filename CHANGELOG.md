@@ -3,6 +3,31 @@
 All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow `VERSION` in `roaming-setup.sh`.
 
+## [8.5] — 2026-10-21
+
+### Fixed
+- **Working Wi-Fi was rolled back as "did not start"** (empty reason, after the full 90 s). The check
+  after applying trusted only `iwinfo <if> info` saying `Mode: Master`; when that CLI is missing or
+  words it differently (OpenWrt 25.12), a running Wi-Fi looked dead. It now asks hostapd itself
+  (`ubus call hostapd.<if> get_status` → `ENABLED`), then `iw`, then `iwinfo`; if netifd's status
+  doesn't name the interface, hostapd's enabled networks with the roaming SSID count.
+- A failed Wi-Fi check always says what it saw per network (interface, hostapd / iw / iwinfo state)
+  instead of an empty `hostapd:`.
+
+### Added
+- The version is shown in every screen's header (`ROAMER v8.5 · …`), including the home menu.
+
+## [8.4] — 2026-10-21
+
+### Fixed
+- **The running hostapd wasn't found** (`pidof hostapd` returns nothing for the jailed hostapd on
+  OpenWrt 25.12), so an old running hostapd — without 802.11v, while the installed one has it — went
+  unnoticed. Running hostapd/wpad processes are now found through `/proc/*/exe`.
+- When hostapd refuses 802.11v and the installed hostapd can do it, Roamer restarts `wpad` and retries
+  **with** 802.11v. Only if it is still refused does 802.11v go — then from **every** network on the
+  radio (they share one hostapd config, so a leftover on another network kept the radio down), and
+  the run lists which networks changed.
+
 ## [8.3] — 2026-10-21
 
 ### Fixed

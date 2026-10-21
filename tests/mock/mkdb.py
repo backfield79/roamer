@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build the fake UCI database for one test: mkdb.py <out.json> [key=value …]
-   lanip=192.168.1.1  wanbr=1 (WAN inside br-lan)  hostname=OpenWrt"""
+   lanip=192.168.1.1  wanbr=1 (WAN inside br-lan)  hostname=OpenWrt  extra=1 (2nd network with 802.11v)"""
 import json, sys
 opt = dict(a.split('=', 1) for a in sys.argv[2:])
 d = {'t': {}, 'o': {}, 'order': [], 'anon': {}}
@@ -8,6 +8,8 @@ def sec(n, t, **o):
     d['t'][n] = t; d['order'].append(n); d['o'][n] = o
 sec('wireless.radio0', 'wifi-device', band='2g', channel='1', htmode='HT20')
 sec('wireless.default_radio0', 'wifi-iface', device='radio0', mode='ap', network='lan', ssid='OpenWrt', encryption='none')
+if opt.get('extra') == '1':   # another network on radio0 that already has 802.11v set (e.g. via LuCI)
+    sec('wireless.wifinet2', 'wifi-iface', device='radio0', mode='ap', network='lan', ssid='Other', encryption='psk2', key='otherpass1', bss_transition='1')
 sec('wireless.radio1', 'wifi-device', band='5g', channel='36', htmode='HE80')
 sec('wireless.default_radio1', 'wifi-iface', device='radio1', mode='ap', network='lan', ssid='OpenWrt', encryption='none')
 ports = ['lan1', 'lan2', 'lan3', 'lan4'] + (['wan'] if opt.get('wanbr') == '1' else [])

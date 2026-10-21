@@ -1,7 +1,10 @@
 #!/bin/sh
-# system log stand-in: hostapd's complaint when it lacks 802.11v (MOCK_WIFI_NOWNM=1, only while a network
-# still has bss_transition set) or refuses the config outright (MOCK_WIFI_FAIL=1)
-if [ "${MOCK_WIFI_NOWNM:-}" = 1 ] && python3 "$(dirname "$0")/uci.py" show wireless 2>/dev/null | grep -q '\.bss_transition='; then
+# system log stand-in: hostapd's complaint when it lacks 802.11v (MOCK_WIFI_NOWNM=1, while a network still
+# has bss_transition set; with MOCK_NOWNM_UNTIL_RESTART=1 only until wpad is restarted) or refuses the
+# config outright (MOCK_WIFI_FAIL=1)
+nownm="${MOCK_WIFI_NOWNM:-}"
+[ "${MOCK_NOWNM_UNTIL_RESTART:-}" = 1 ] && [ -f "$MOCK_STATE/wpad_restarted" ] && nownm=""
+if [ "$nownm" = 1 ] && python3 "$(dirname "$0")/uci.py" show wireless 2>/dev/null | grep -q '\.bss_transition='; then
   echo "daemon.err hostapd: Line 41: unknown configuration item 'bss_transition'"
   echo "daemon.err hostapd: 1 errors found in configuration file '<inline>'"
 fi

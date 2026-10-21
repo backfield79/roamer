@@ -1,4 +1,5 @@
 #!/bin/sh
+[ "${MOCK_NO_IWINFO:-0}" = 1 ] && exit 127     # 25.12 box without the iwinfo CLI
 case "$2" in
   txpowerlist) for d in 0 3 6 9 12 15 17 18 19 20; do echo "   $d dBm (x mW)"; done ;;
   info) case "$1" in *radio0*|phy0*) c="6 (2.437 GHz)";; *) c="44 (5.220 GHz)";; esac

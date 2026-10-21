@@ -1,5 +1,5 @@
 #!/bin/sh
-# Roamer — seamless Wi-Fi roaming for OpenWrt: 802.11r (FT) + 802.11k/v + usteer.        v8.3
+# Roamer — seamless Wi-Fi roaming for OpenWrt: 802.11r (FT) + 802.11k/v + usteer.        v8.5
 # https://github.com/OWNER/roamer · MIT License · POSIX sh / busybox ash
 # Works on any OpenWrt 24.10/25.12 router with a 2.4 and/or 5 GHz radio. Docs: README.md, docs/
 #
@@ -23,7 +23,7 @@
 #   DRY_RUN=1  ASSUME_YES=1  GUARD=0  PING_HOST 1.1.1.1  WIFI_WAIT <s>  CLEAR=0  NO_COLOR=1  COLS <n>
 set -eu
 
-VERSION=8.3
+VERSION=8.5
 NAME_SET=0; [ -n "${NAME+x}" ] && NAME_SET=1
 TS="$(date +%Y%m%d-%H%M%S)"
 DRY_RUN="${DRY_RUN:-0}"; GUARD="${GUARD:-1}"; PING_HOST="${PING_HOST:-1.1.1.1}"
@@ -106,7 +106,7 @@ progress() {   # chapter line + bar
 step() {   # step "Title" [final]
   STEPN=$((STEPN+1))
   if [ $TTY = 1 ] && [ "$CLEAR" = 1 ]; then printf '\033[H\033[2J' >/dev/tty; fi
-  _left=" ROAMER · $WHO"; _right="step $STEPN "
+  _left=" ROAMER v$VERSION · $WHO"; _right="step $STEPN "
   say "${D}${HR}${N}"
   say "${B}${CY}${_left}${N}$(rep ' ' $((COLS - $(dw "$_left") - $(dw "$_right"))))${D}${_right}${N}"
   progress "${2:-}"
@@ -1997,13 +1997,57 @@ COMMITTED=1
 /etc/init.d/usteer enable
 
 # ================================================================ apply: Dumb AP
-wifi_up() {   # every roaming Wi-Fi network is actually broadcasting (hostapd accepted its config)
-  _ws="$(ubus call network.wireless status 2>/dev/null)" || return 1
-  printf '%s\n' "$PLAN" | { while IFS='|' read -r _r _b _if _n _u _c _h _t; do
-    [ -n "$_r" ] || continue
-    _ifn="$(jsonfilter -s "$_ws" -e "@.$_r.interfaces[@.section='$_if'].ifname" 2>/dev/null | head -n1)"
-    [ -n "$_ifn" ] && iwinfo "$_ifn" info 2>/dev/null | grep -q 'Mode: Master' || exit 1
-  done; exit 0; }
+# Is a roaming network broadcasting? hostapd itself is asked first (ubus hostapd.<if> get_status —
+# present on every wpad build), then iw, then iwinfo; any one that says "AP running" is enough.
+# Interface names come from netifd's status; if that lookup fails, an enabled hostapd BSS with our
+# SSID counts. (≤ 8.4 trusted only "iwinfo … Mode: Master" — a missing or differently-worded iwinfo
+# made a working Wi-Fi look dead.)
+wif_name() {     # <radio> <wifi-iface section> → kernel interface name, or nothing
+  _ws="$(ubus call network.wireless status 2>/dev/null)" || return 0
+  for _q in "@.$1.interfaces[@.section=\"$2\"].ifname" "@.$1.interfaces[@.section='$2'].ifname"; do
+    _x="$(jsonfilter -s "$_ws" -e "$_q" 2>/dev/null | head -n1)"; [ -z "$_x" ] || { echo "$_x"; return 0; }
+  done
+}
+bss_up() {       # <ifname> → 0 when that interface is an AP that is running
+  ubus call "hostapd.$1" get_status 2>/dev/null | grep -q '"status": *"ENABLED"' && return 0
+  iw dev "$1" info 2>/dev/null | grep -q 'type AP' && return 0
+  iwinfo "$1" info 2>/dev/null | grep -qE 'Mode: (Master|AP)' && return 0
+  return 1
+}
+ssid_bss() {     # number of enabled hostapd BSSes broadcasting our SSID
+  _k=0
+  for _o in $(ubus list 'hostapd.*' 2>/dev/null); do
+    _st="$(ubus call "$_o" get_status 2>/dev/null)"
+    printf '%s' "$_st" | grep -q '"status": *"ENABLED"' || continue
+    [ "$(jf "$_st" '@.ssid')" = "$SSID" ] && _k=$((_k + 1))
+  done; echo $_k
+}
+wifi_up() {      # every roaming Wi-Fi network is broadcasting
+  _need=0; _bad=0
+  for _e in $(printf '%s\n' "$PLAN" | cut -d'|' -f1,3); do
+    _need=$((_need + 1)); _ifn="$(wif_name "${_e%%|*}" "${_e#*|}")"
+    [ -n "$_ifn" ] && bss_up "$_ifn" || _bad=$((_bad + 1))
+  done
+  [ "$_need" -gt 0 ] || return 1
+  [ "$_bad" = 0 ] || [ "$(ssid_bss)" -ge "$_need" ]     # hostapd itself reports our SSID on enough BSSes
+}
+wifi_fail() {    # one line: why Wi-Fi counts as not started
+  _y="$(wifi_why)"
+  if [ -n "$_y" ]; then echo "Wi-Fi did not start — hostapd: $_y · the check saw: $(wifi_facts)"
+  else echo "Wi-Fi did not start within ${WIFI_MAX}s — hostapd logged no error; the check saw: $(wifi_facts)"; fi
+}
+wifi_facts() {   # what the Wi-Fi check saw, per roaming network (no secrets) — for the log on failure
+  for _e in $(printf '%s\n' "$PLAN" | cut -d'|' -f1,3); do
+    _r="${_e%%|*}"; _s="${_e#*|}"; _ifn="$(wif_name "$_r" "$_s")"
+    printf '%s/%s → %s' "$_r" "$_s" "${_ifn:-no interface}"
+    if [ -n "$_ifn" ]; then
+      printf ' · hostapd %s · iw %s · iwinfo %s' \
+        "$(ubus call "hostapd.$_ifn" get_status 2>/dev/null | sed -n 's/.*"status": *"\([A-Z_]*\)".*/\1/p' | head -n1 | grep . || echo -)" \
+        "$(iw dev "$_ifn" info 2>/dev/null | sed -n 's/^[[:space:]]*type //p' | head -n1 | grep . || echo -)" \
+        "$(iwinfo "$_ifn" info 2>/dev/null | sed -n 's/.*Mode: \([A-Za-z]*\).*/\1/p' | head -n1 | grep . || echo -)"
+    fi; printf '; '
+  done
+  printf 'hostapd BSSes with SSID %s: %s' "'$SSID'" "$(ssid_bss)"
 }
 WIFI_MAX="${WIFI_WAIT:-90}"; isset WIFI_WAIT || case " $(autolist 5g 2>/dev/null) $(printf '%s' "$PLAN" | cut -d'|' -f6 | tr '\n' ' ') " in *" 1"[0-4][0-9]" "*|*" 5"[2-9]" "*|*" 6"[0-4]" "*) WIFI_MAX=160;; esac   # DFS: 60 s radar check
 wifi_wait() {
@@ -2014,8 +2058,12 @@ wifi_wait() {
     sleep 3
   done; return 1
 }
+hapd_pids() {    # running hostapd/wpad processes — via /proc/*/exe, which also finds them inside ujail
+  for _d in /proc/[0-9]*; do
+    case "$(readlink "$_d/exe" 2>/dev/null)" in */wpad*|*/hostapd*) echo "${_d#/proc/}";; esac; done
+}
 wpad_stale() {   # the RUNNING hostapd is not the installed one: replaced binary, or one without 802.11v
-  for _p in $(pidof hostapd 2>/dev/null); do
+  for _p in $(hapd_pids); do
     readlink "/proc/$_p/exe" 2>/dev/null | grep -q '(deleted)' && return 0
     bin_wnm "${HBIN:-/nonexistent}" && ! bin_wnm "/proc/$_p/exe" && return 0      # installed has 802.11v, running hasn't
   done; return 1
@@ -2028,17 +2076,35 @@ wpad_fresh() {   # make sure the hostapd that will read our config is the instal
 hlog() { logread 2>/dev/null | grep -v 'roaming-setup' | grep -E 'hostapd|wpad' || true; }   # hostapd's own lines only
 HLOG0=0; hmark() { HLOG0="$(hlog | wc -l)"; }                    # remember where the log was before we applied
 drop_wnm() {     # this hostapd refuses 802.11v: remove the option entirely — the wifi scripts pass it
-                 # on whenever it is SET (even =0), and such a hostapd rejects the key itself
-  printf '%s\n' "$PLAN" | while IFS='|' read -r _r _b _if _n _u _c _h _t; do
-    if [ -n "$_if" ]; then uci -q delete "wireless.$_if.bss_transition" || true; fi; done
+                 # on whenever it is SET (even =0), and such a hostapd rejects the key itself. All networks
+                 # of a radio share one hostapd config, so one leftover elsewhere on the radio breaks it too.
+  _dl=""
+  for _s in $(sections wireless wifi-iface); do
+    case " $SEL " in *" $(iget "$_s" device) "*) ;; *) continue;; esac
+    [ -n "$(iget "$_s" bss_transition)" ] || continue
+    uci -q delete "wireless.$_s.bss_transition" || true; _dl="$_dl $_s"
+  done
+  log "  802.11v removed from:${_dl:- (nothing set)}"
   uci commit wireless; hmark; wifi >/dev/null 2>&1 || true
+}
+wifi_recover() { # Wi-Fi didn't come up. Returns 0 when it is up after the fixes below; sets WNMOFF=1 if 802.11v had to go
+  wifi_why | grep -q bss_transition || return 1
+  log "hostapd refuses 802.11v (bss_transition)"; log "  hostapd: $(wifi_why)"; log "  $(wnm_facts)"
+  if bin_wnm "${HBIN:-/nonexistent}"; then          # the installed one can — so the running one is old
+    log "  the installed hostapd can do 802.11v — restarting wpad so that one runs"
+    /etc/init.d/wpad restart >/dev/null 2>&1 || true; sleep 3; hmark; wifi >/dev/null 2>&1 || true
+    if wifi_wait; then log "  ✓ Wi-Fi up with 802.11v after restarting wpad"; return 0; fi
+    log "  still refused after the restart: $(wifi_why)"
+  fi
+  log "  retrying without 802.11v"; drop_wnm; WNMOFF=1
+  wifi_wait
 }
 wifi_why() {     # hostapd's complaint since we applied (not older lines, not Roamer's own)
   _w="$(hlog | tail -n +$((HLOG0 + 1)))"; [ -n "$_w" ] || _w="$(hlog | tail -n 20)"
   printf '%s\n' "$_w" | grep -iE 'unknown|invalid|fail|error|could not' | sed -E 's/^.*(hostapd|wpad)[^:]*: *//' \
     | awk '!seen[$0]++' | tail -n 3 | tr '\n' ' '
 }
-wnm_facts() { echo "installed: $(wpad_pkgs)· /usr/sbin/hostapd → ${HBIN:-?} 802.11v=$(bin_wnm "${HBIN:-/nonexistent}" && echo yes || echo no) · running: $(for _p in $(pidof hostapd 2>/dev/null); do printf '%s(802.11v=%s) ' "$(readlink "/proc/$_p/exe")" "$(bin_wnm "/proc/$_p/exe" && echo yes || echo no)"; done)"; }
+wnm_facts() { echo "installed: $(wpad_pkgs)· /usr/sbin/hostapd → ${HBIN:-?} 802.11v=$(bin_wnm "${HBIN:-/nonexistent}" && echo yes || echo no) · running: $(for _p in $(hapd_pids); do printf '%s %s(802.11v=%s) ' "$_p" "$(readlink "/proc/$_p/exe")" "$(bin_wnm "/proc/$_p/exe" && echo yes || echo no)"; done)"; }
 LOGIN_RE='[Aa]uth succeeded|accepted login'
 logins() { logread -e "$LOGIN_RE" 2>/dev/null | wc -l; }
 brok() {   # every LAN port is in br-lan — carrier is NOT required (cables may be moving right now)
@@ -2149,9 +2215,9 @@ if [ "$ROLE" = ap ]; then
     [ "$TMPWAN" = 0 ] || alog "temporary way in: WAN $(ip -4 -o addr show "$wdev" 2>/dev/null | awk '{print $4}' | head -n1)"
     st "applying|||starting Wi-Fi (DFS channels need ~60 s)"
     if wifi_wait; then alog "Wi-Fi is up on: $SEL"
-    elif wifi_why | grep -q bss_transition && { alog "this hostapd refuses 802.11v — retrying without it · $(wnm_facts)"; drop_wnm; wifi_wait; }; then
-      alog "Wi-Fi is up on: $SEL (802.11v off: install the full wpad, reboot, run again)"
-    else rollback "Wi-Fi did not start — hostapd: $(wifi_why)"; fi
+    elif WNMOFF=0; wifi_recover; then
+      alog "Wi-Fi is up on: $SEL$([ "$WNMOFF" = 1 ] && echo " (802.11v off — see the log above)")"
+    else rollback "$(wifi_fail)"; fi
     DL=$(( $(date +%s) + CONFIRM_TIMEOUT ))
     n0="$(logins)"; t=0; ok=0; last=""; how=""; msg=""
     while :; do
@@ -2194,14 +2260,7 @@ ubus call network reload; sleep 2; wifi >/dev/null 2>&1 || true
 sleep 3; /etc/init.d/usteer restart
 ok=1; WHY=""; WNMOFF=0
 say "  ${D}waiting for Wi-Fi to come up (up to ${WIFI_MAX}s) …${N}"
-if ! wifi_wait; then
-  if wifi_why | grep -q bss_transition; then
-    log "this hostapd refuses 802.11v (bss_transition) — retrying without it"
-    log "  hostapd: $(wifi_why)"; log "  $(wnm_facts)"
-    drop_wnm; WNMOFF=1
-    wifi_wait || { ok=0; WHY="Wi-Fi did not start — hostapd: $(wifi_why)"; }
-  else ok=0; WHY="Wi-Fi did not start — hostapd: $(wifi_why)"; fi
-fi
+if ! wifi_wait && ! wifi_recover; then ok=0; WHY="$(wifi_fail)"; fi
 if [ $ok = 1 ] && [ "$GUARD" = 1 ] && [ "$was_ok" = 1 ]; then
   t=0; while [ $t -lt 45 ]; do health && break; sleep 3; t=$((t+3)); done
   health || { ok=0; WHY="internet lost after apply"; }

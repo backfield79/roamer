@@ -1,13 +1,23 @@
 #!/bin/sh
 # network.wireless status: every wifi-iface is up (MOCK_WIFI_FAIL=1: hostapd refused the config → no ifname)
+# hostapd.<ifname> get_status / list 'hostapd.*': the same view, as hostapd's own ubus objects show it
+# MOCK_NOSECTION=1: netifd's status lacks the "section" key (Roamer must fall back to hostapd's SSIDs)
 case "$*" in
-  *"network.wireless status"*)
-    python3 - <<'PY'
-import json, os
+  *"network.wireless status"*|"list hostapd.*"|"call hostapd."*" get_status") ;;
+  *) exit 0;;
+esac
+python3 - "$@" <<'PY'
+import json, os, sys
+a = sys.argv[1:]
 d = json.load(open(os.environ['MOCK_STATE'] + '/live.json'))
 fail = os.environ.get('MOCK_WIFI_FAIL') == '1'
-nownm = os.environ.get('MOCK_WIFI_NOWNM') == '1'   # hostapd without 802.11v: refuses bss_transition=1
-out = {}
+nownm = os.environ.get('MOCK_WIFI_NOWNM') == '1'   # hostapd without 802.11v: refuses any bss_transition
+if nownm and os.environ.get('MOCK_NOWNM_UNTIL_RESTART') == '1' and os.path.exists(os.environ['MOCK_STATE'] + '/wpad_restarted'):
+    nownm = False                                   # …only the old, running hostapd did; the installed one is fine
+bad = set()                                         # radios whose shared hostapd config holds bss_transition
+for s in d['order']:
+    if d['t'][s] == 'wifi-iface' and 'bss_transition' in d['o'][s]: bad.add(d['o'][s].get('device'))
+out = {}; bss = {}
 for s in d['order']:
     if d['t'][s] == 'wifi-device':
         out[s.split('.')[1]] = {'up': True, 'interfaces': []}
@@ -15,11 +25,17 @@ for s in d['order']:
     if d['t'][s] == 'wifi-iface':
         r = d['o'][s].get('device'); n = s.split('.')[1]
         if r in out:
-            i = {'section': n}
-            if not fail and not (nownm and 'bss_transition' in d['o'][s]): i['ifname'] = 'phy%s-%s' % (r[-1], n)
+            i = {} if os.environ.get('MOCK_NOSECTION') == '1' else {'section': n}
+            if not fail and not (nownm and r in bad):
+                i['ifname'] = 'phy%s-%s' % (r[-1], n)
+                bss[i['ifname']] = d['o'][s].get('ssid', '')
             out[r]['interfaces'].append(i)
-print(json.dumps(out))
+if a[0] == 'list':
+    for k in bss: print('hostapd.' + k)
+elif a[1].startswith('hostapd.'):
+    k = a[1][len('hostapd.'):]
+    if k not in bss: sys.exit(4)                    # ubus: "Not found"
+    print(json.dumps({'status': 'ENABLED', 'ssid': bss[k], 'channel': 1}, indent='\t').replace('":', '": '))
+else:
+    print(json.dumps(out))
 PY
-    ;;
-esac
-exit 0
